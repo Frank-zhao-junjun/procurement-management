@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { insertSupplierSchema } from '@/storage/database/shared/schema';
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // GET /api/suppliers - 获取供应商列表
 export async function GET(request: NextRequest) {
@@ -45,10 +46,17 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/suppliers - 创建供应商
+// 仅 buyer 和 manager 可创建
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
     const body = await request.json();
+
+    // 仅 buyer 和 manager 可创建供应商
+    if (role !== 'buyer' && role !== 'manager') {
+      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建供应商' }, { status: 403 });
+    }
 
     // 验证输入
     const parsed = insertSupplierSchema.safeParse(body);
@@ -70,12 +78,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 记录审计日志
-    const actor = request.headers.get('X-Actor') || 'system';
     await client.from('audit_logs').insert({
       entity_type: 'supplier',
       entity_id: supplier.id,
       action: 'create',
       actor,
+      actor_role: role,
       detail: { name: supplier.name },
     });
 

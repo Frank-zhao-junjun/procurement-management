@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { materials, insertMaterialSchema, auditLogs } from '@/storage/database/shared/schema';
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 import { z } from 'zod';
 
 // GET /api/materials - 获取物料列表
@@ -46,10 +47,17 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/materials - 创建物料
+// 仅 buyer 和 manager 可创建
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
     const body = await request.json();
+
+    // 仅 buyer 和 manager 可创建物料
+    if (role !== 'buyer' && role !== 'manager') {
+      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建物料' }, { status: 403 });
+    }
 
     // 验证输入
     const parsed = insertMaterialSchema.safeParse(body);
@@ -71,12 +79,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 记录审计日志
-    const actor = request.headers.get('X-Actor') || 'system';
     await client.from('audit_logs').insert({
       entity_type: 'material',
       entity_id: material.id,
       action: 'create',
       actor,
+      actor_role: role,
       detail: { name: material.name },
     });
 
