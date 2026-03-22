@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'buyer',
-  };
-}
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // PUT /api/purchase-orders/[id]/status - 更新采购订单状态
 export async function PUT(
@@ -18,7 +11,7 @@ export async function PUT(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     const newStatus = body.status;
     const validStatuses = ['draft', 'sent', 'partial', 'received', 'cancelled'];

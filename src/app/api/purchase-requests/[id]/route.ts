@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'requester',
-  };
-}
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-requests/[id] - 获取单个采购申请
 export async function GET(
@@ -46,7 +39,7 @@ export async function PUT(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     // 检查当前状态
     const { data: existing, error: findError } = await client
@@ -139,7 +132,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     // 检查状态
     const { data: existing } = await client

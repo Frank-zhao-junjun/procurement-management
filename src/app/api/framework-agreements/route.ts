@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'buyer',
-  };
-}
+import { getUserIdentity, filterFrameworkAgreements, type Role } from '@/lib/role-filter';
 
 // GET /api/framework-agreements - 获取框架协议列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status') || 'active';
     const supplierId = searchParams.get('supplierId');
@@ -40,6 +34,9 @@ export async function GET(request: NextRequest) {
       query = query.eq('material_id', parseInt(materialId, 10));
     }
 
+    // 按角色过滤
+    query = filterFrameworkAgreements(query, role, actor);
+
     const { data, error, count } = await query;
 
     if (error) {
@@ -62,7 +59,7 @@ export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     // 生成 FA 编号（使用上海时区 + 99上限）
     const faNumber = await numberGenerators.fa();

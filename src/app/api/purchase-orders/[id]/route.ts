@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'buyer',
-  };
-}
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders/[id] - 获取单个采购订单
 export async function GET(
