@@ -1,19 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 生成 FA 编号
-async function generateFANumber(client: any): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { count } = await client
-    .from('framework_agreements')
-    .select('*', { count: 'exact', head: true })
-    .like('fa_number', `FA-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `FA-${dateStr}-${seq}`;
-}
+import { numberGenerators } from '@/storage/database/number-generator';
 
 // 获取当前用户信息
 function getActorInfo(request: NextRequest): { actor: string; role: string } {
@@ -77,8 +64,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actor, role } = getActorInfo(request);
 
-    // 生成 FA 编号
-    const faNumber = await generateFANumber(client);
+    // 生成 FA 编号（使用上海时区 + 99上限）
+    const faNumber = await numberGenerators.fa();
 
     // 获取供应商快照
     let supplierSnapshot = body.supplierSnapshot || '';

@@ -1,19 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 生成 QT 编号
-async function generateQTNumber(client: any): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { count } = await client
-    .from('quotes')
-    .select('*', { count: 'exact', head: true })
-    .like('quote_number', `QT-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `QT-${dateStr}-${seq}`;
-}
+import { numberGenerators } from '@/storage/database/number-generator';
 
 // 获取当前用户信息
 function getActorInfo(request: NextRequest): { actor: string; role: string } {
@@ -77,8 +64,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actor, role } = getActorInfo(request);
 
-    // 生成 QT 编号
-    const quoteNumber = await generateQTNumber(client);
+    // 生成报价单编号（使用 Q- 前缀 + 上海时区 + 99上限）
+    const quoteNumber = await numberGenerators.quote();
 
     // 计算总价
     const quantity = parseFloat(body.quantity || '0');

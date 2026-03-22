@@ -1,19 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 生成 PO 编号
-async function generatePONumber(client: any): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { count } = await client
-    .from('purchase_orders')
-    .select('*', { count: 'exact', head: true })
-    .like('po_number', `PO-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `PO-${dateStr}-${seq}`;
-}
+import { numberGenerators } from '@/storage/database/number-generator';
 
 // 获取当前用户信息
 function getActorInfo(request: NextRequest): { actor: string; role: string } {
@@ -72,8 +59,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actor, role } = getActorInfo(request);
 
-    // 生成 PO 编号
-    const poNumber = await generatePONumber(client);
+    // 生成 PO 编号（使用上海时区 + 99上限）
+    const poNumber = await numberGenerators.po();
 
     // 计算到货日期（最晚日期）
     let deliveryDate = body.deliveryDate;

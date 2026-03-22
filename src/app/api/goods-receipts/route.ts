@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
+import { generateGRNumber } from '@/storage/database/number-generator';
 
-// 生成 GR 编号
-async function generateGRNumber(client: any, grType: string = 'in'): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  const prefix = grType === 'out' ? 'RT' : 'GR'; // RT = Return, GR = Goods Receipt
-  
-  const { count } = await client
-    .from('goods_receipts')
-    .select('*', { count: 'exact', head: true })
-    .like('gr_number', `${prefix}-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `${prefix}-${dateStr}-${seq}`;
-}
+// 超收阈值（5%）
+const OVERDELIVERY_THRESHOLD = 0.05;
 
 // 获取当前用户信息
 function getActorInfo(request: NextRequest): { actor: string; role: string } {
@@ -84,9 +73,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'PO line not found' }, { status: 404 });
     }
 
-    // 生成 GR 编号
+    // 生成 GR/RT 编号（使用上海时区 + 99上限）
     const grType = body.grType || 'in';
-    const grNumber = await generateGRNumber(client, grType);
+    const grNumber = await generateGRNumber(grType);
 
     // 计算收货后的净收货数量
     const currentReceived = parseFloat(poLine.received_qty || '0');
@@ -105,7 +94,69 @@ export async function POST(request: NextRequest) {
     const orderQty = parseFloat(poLine.quantity);
     const pendingQty = Math.max(0, orderQty - newReceivedQty);
 
-    // 更新 PO 行
+    // 检测超收（收货数量超过订单的 5%）
+    let isOverdelivery = false;
+    let overdeliveryRatio = 0;
+    let overdeliveryApproval = false;
+    
+    if (grType === 'in' && newReceivedQty > orderQty) {
+      overdeliveryRatio = (newReceivedQty - orderQty) / orderQty;
+      isOverdelivery = overdeliveryRatio > OVERDELIVERY_THRESHOLD;
+    }
+
+    // 如果超收且当前角色不是 manager，需要审批
+    if (isOverdelivery && role !== 'manager') {
+      // 插入待审批的收货单
+      const { data: gr, error: grError } = await client
+        .from('goods_receipts')
+        .insert({
+          gr_number: grNumber,
+          po_id: body.poId || poLine.order_id,
+          po_line_id: body.poLineId,
+          gr_type: grType,
+          quantity: body.quantity,
+          receipt_date: body.receiptDate,
+          receipt_time: new Date().toTimeString().slice(0, 8),
+          receiver: actor,
+          notes: body.notes || null,
+          status: 'pending_approval', // 待审批状态
+          is_overdelivery: true,
+          overdelivery_ratio: overdeliveryRatio,
+        })
+        .select()
+        .single();
+
+      if (grError) {
+        return NextResponse.json({ error: grError.message }, { status: 500 });
+      }
+
+      // 记录超收审计日志
+      await client.from('audit_logs').insert({
+        entity_type: 'goods_receipt',
+        entity_id: gr.id,
+        action: 'overdelivery_pending_approval',
+        actor,
+        actor_role: role,
+        detail: {
+          gr_number: grNumber,
+          po_line_id: body.poLineId,
+          order_qty: orderQty,
+          current_received_qty: currentReceived,
+          gr_quantity: grQuantity,
+          new_received_qty: newReceivedQty,
+          overdelivery_ratio: overdeliveryRatio,
+          threshold: OVERDELIVERY_THRESHOLD,
+        },
+      });
+
+      return NextResponse.json({
+        data: gr,
+        warning: '超收超过5%，需要Manager审批',
+        requires_approval: true,
+      }, { status: 202 });
+    }
+
+    // 正常更新 PO 行
     await client
       .from('purchase_order_lines')
       .update({

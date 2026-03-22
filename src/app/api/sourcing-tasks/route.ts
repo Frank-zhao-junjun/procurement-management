@@ -1,19 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-
-// 生成 SC 编号
-async function generateSCNumber(client: any): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { count } = await client
-    .from('sourcing_tasks')
-    .select('*', { count: 'exact', head: true })
-    .like('task_number', `SC-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `SC-${dateStr}-${seq}`;
-}
+import { numberGenerators } from '@/storage/database/number-generator';
 
 // 获取当前用户信息
 function getActorInfo(request: NextRequest): { actor: string; role: string } {
@@ -72,8 +59,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actor, role } = getActorInfo(request);
 
-    // 生成 SC 编号
-    const taskNumber = await generateSCNumber(client);
+    // 生成 SC 编号（使用上海时区 + 99上限）
+    const taskNumber = await numberGenerators.sc();
 
     // 获取 PR 快照
     let prSnapshot = '';

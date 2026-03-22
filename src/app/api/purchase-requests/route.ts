@@ -1,33 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { z } from 'zod';
-
-// 生成 PR 编号
-async function generatePRNumber(client: any): Promise<string> {
-  const today = new Date();
-  const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-  
-  const { count } = await client
-    .from('purchase_requests')
-    .select('*', { count: 'exact', head: true })
-    .like('pr_number', `PR-${dateStr}-%`);
-
-  const seq = String((count || 0) + 1).padStart(2, '0');
-  return `PR-${dateStr}-${seq}`;
-}
-
-// 获取当前用户信息（从请求头）
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'requester',
-  };
-}
+import { numberGenerators } from '@/storage/database/number-generator';
+import { getUserIdentity, filterPurchaseRequests, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-requests - 获取采购申请列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
     const applicant = searchParams.get('applicant');
@@ -45,7 +26,11 @@ export async function GET(request: NextRequest) {
       query = query.eq('status', status);
     }
 
-    if (applicant) {
+    // 按角色过滤
+    query = filterPurchaseRequests(query, role as Role, actor);
+
+    if (applicant && role === 'manager') {
+      // Manager 可以指定查看某个申请人的
       query = query.eq('applicant', applicant);
     }
 
@@ -70,11 +55,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
 
-    // 生成 PR 编号
-    const prNumber = await generatePRNumber(client);
+    // 生成 PR 编号（使用上海时区 + 99上限）
+    const prNumber = await numberGenerators.pr();
 
     // 插入主表
     const { data: pr, error: prError } = await client
