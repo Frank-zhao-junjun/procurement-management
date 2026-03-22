@@ -168,8 +168,8 @@ async function createPOFromFAMatch(
     // 生成 PO 编号
     const poNumber = await numberGenerators.po();
 
-    // 获取 PR 行最晚期望日期
-    let deliveryDate = prLine.purchase_requests?.expected_delivery_date;
+    // 获取 PR 行自己的期望交货日期
+    let deliveryDate = prLine.expectedDeliveryDate;
 
     // 创建 PO
     const { data: po, error: poError } = await client

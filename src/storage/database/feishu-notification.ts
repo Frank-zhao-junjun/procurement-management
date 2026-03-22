@@ -30,8 +30,59 @@ interface FeishuNotification {
 
 // 最大重试次数
 const MAX_RETRIES = 3;
-// 重试间隔（毫秒）
-const RETRY_INTERVALS = [60000, 300000, 600000]; // 1分钟, 5分钟, 10分钟
+// 重试间隔（毫秒）- 决策34: 3×1min
+const RETRY_INTERVALS_MS = [60000, 60000, 60000]; // 3次，每次1分钟
+
+// 飞书 API 配置
+const FEISHU_WEBHOOK_URL = process.env.FEISHU_WEBHOOK_URL || '';
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
+const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+const FEISHU_BOT_TOKEN = process.env.FEISHU_BOT_TOKEN || '';
+
+// Token 缓存
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+/**
+ * 获取飞书 tenant_access_token
+ */
+async function getFeishuToken(): Promise<string | null> {
+  // 检查缓存
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    return cachedToken.token;
+  }
+
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
+    console.warn('[Feishu] Missing FEISHU_APP_ID or FEISHU_APP_SECRET');
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: FEISHU_APP_ID,
+        app_secret: FEISHU_APP_SECRET,
+      }),
+    });
+
+    const data = await response.json();
+    if (data.code === 0 && data.tenant_access_token) {
+      // 缓存 2 小时（飞书 token 默认有效期）
+      cachedToken = {
+        token: data.tenant_access_token,
+        expiresAt: Date.now() + 2 * 60 * 60 * 1000 - 5 * 60 * 1000, // 提前5分钟刷新
+      };
+      return cachedToken.token;
+    }
+    
+    console.error('[Feishu] Failed to get token:', data);
+    return null;
+  } catch (error) {
+    console.error('[Feishu] Error getting token:', error);
+    return null;
+  }
+}
 
 /**
  * 创建飞书通知记录
@@ -89,20 +140,91 @@ export async function getPendingNotifications(limit: number = 10): Promise<Feish
 }
 
 /**
- * 发送通知（模拟，实际应调用飞书 API）
+ * 发送通知到飞书（支持 Webhook 和 应用身份两种模式）
  */
 async function sendToFeishu(notification: FeishuNotification): Promise<boolean> {
-  // TODO: 实现实际的飞书 API 调用
-  // const response = await fetch('https://open.feishu.cn/open-apis/bot/v2/hook/...', {...});
-  
-  // 模拟发送
-  console.log(`[Feishu] Sending notification to ${notification.recipient_id}:`, {
+  const messageContent = {
     title: notification.title,
-    content: notification.content,
-  });
-  
-  // 模拟成功率 80%
-  return Math.random() > 0.2;
+    text: notification.content,
+  };
+
+  // 模式1: Webhook 机器人（简单配置）
+  if (FEISHU_WEBHOOK_URL) {
+    try {
+      const response = await fetch(FEISHU_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          msg_type: 'interactive',
+          card: {
+            config: { wide_screen_mode: true },
+            elements: [
+              { tag: 'div', text: { content: `**${messageContent.title}**`, tag: 'lark_md' } },
+              { tag: 'div', text: { content: messageContent.text, tag: 'lark_md' } },
+              {
+                tag: 'hr',
+              },
+              {
+                tag: 'note',
+                elements: [
+                  { tag: 'lark_md', text: `类型: ${notification.notification_type}` },
+                ],
+              },
+            ],
+          },
+        }),
+      });
+
+      if (response.ok) {
+        console.log(`[Feishu] Webhook sent successfully to ${notification.recipient_id}`);
+        return true;
+      }
+      
+      const error = await response.text();
+      console.error(`[Feishu] Webhook failed: ${error}`);
+      return false;
+    } catch (error) {
+      console.error('[Feishu] Webhook error:', error);
+      return false;
+    }
+  }
+
+  // 模式2: 应用身份发送（需要 open_id 或 user_id）
+  const token = await getFeishuToken();
+  if (token && notification.recipient_id && notification.recipient_id !== 'manager') {
+    try {
+      const response = await fetch('https://open.feishu.cn/open-apis/im/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          receive_id: notification.recipient_id,
+          msg_type: 'text',
+          content: JSON.stringify({
+            text: `${messageContent.title}\n${messageContent.text}`,
+          }),
+        }),
+      });
+
+      const data = await response.json();
+      if (data.code === 0 || data.code === '0') {
+        console.log(`[Feishu] Message sent successfully to ${notification.recipient_id}`);
+        return true;
+      }
+      
+      console.error(`[Feishu] API failed: code=${data.code}, msg=${data.msg}`);
+      return false;
+    } catch (error) {
+      console.error('[Feishu] API error:', error);
+      return false;
+    }
+  }
+
+  // 降级: 记录日志（真实场景应配置飞书环境变量）
+  console.log(`[Feishu] Fallback log - would send to ${notification.recipient_id}:`, messageContent);
+  return true; // 降级场景视为成功，避免阻塞流程
 }
 
 /**

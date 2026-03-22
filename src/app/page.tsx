@@ -162,6 +162,7 @@ export default function DashboardPage() {
           <CardTitle className="text-blue-800 flex items-center gap-2">
             <span>🤖</span> Agent 使用完整指引 (§9)
           </CardTitle>
+          <p className="text-xs text-blue-600 mt-1">共 9 条核心指引，覆盖身份、全流程、飞书绑定</p>
         </CardHeader>
         <CardContent>
           <div className="space-y-4 text-sm">
@@ -212,6 +213,20 @@ export default function DashboardPage() {
               <div>
                 <p className="font-semibold text-gray-900">编号规则与防重 (§6, 决策35)</p>
                 <p className="text-gray-600 mt-1">所有单据使用 Asia/Shanghai 时区，日流水号 01-99，第 100 次操作返回错误。前缀规则：PR-/SC-/Q-/FA-/PO-/GR-/RT-（退货）。报价单使用 Q-XXXXXX 全局序号。</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">8</span>
+              <div>
+                <p className="font-semibold text-gray-900">飞书三入口与绑定 (§2.5, 决策38)</p>
+                <p className="text-gray-600 mt-1">支持三种飞书入口：工作台/机器人/消息链接。Agent 通过 <code className="bg-gray-100 px-1 rounded">POST /api/feishu-bindings</code> 自助绑定（无需工号邮箱）。用户数据隔离：requester 角色只看自己提交的单据。</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">9</span>
+              <div>
+                <p className="font-semibold text-gray-900">口语化识别与用户确认 (§5.1.1)</p>
+                <p className="text-gray-600 mt-1">FA 匹配后状态为 pending_confirm，不再静默自动确认。系统返回 Top-3 候选方案（审计日志备查），Agent 展示给用户确认。拒绝 FA 自动创建寻源任务。</p>
               </div>
             </div>
           </div>

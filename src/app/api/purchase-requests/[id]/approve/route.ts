@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'manager',
-  };
-}
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // POST /api/purchase-requests/[id]/approve - 审批采购申请
 export async function POST(
@@ -19,7 +12,7 @@ export async function POST(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     const approved = body.approved !== false; // 默认批准
 

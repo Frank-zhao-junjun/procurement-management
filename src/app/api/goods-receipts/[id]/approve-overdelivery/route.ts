@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
+import { getUserIdentity, type Role } from '@/lib/role-filter';
 
 // POST /api/goods-receipts/[id]/approve-overdelivery - 审批超收收货单
 export async function POST(
@@ -10,7 +11,7 @@ export async function POST(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
+    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
 
     // 只有 manager 可以审批
     if (role !== 'manager') {
@@ -102,14 +103,6 @@ export async function POST(
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-}
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'manager',
-  };
 }
 
 // 更新 PO 头状态
