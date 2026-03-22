@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'buyer',
-  };
-}
+import { getUserIdentity, filterQuotes, type Role } from '@/lib/role-filter';
 
 // GET /api/quotes - 获取报价单列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const searchParams = request.nextUrl.searchParams;
     const sourcingTaskId = searchParams.get('sourcingTaskId');
     const supplierId = searchParams.get('supplierId');
@@ -40,6 +34,9 @@ export async function GET(request: NextRequest) {
       query = query.eq('status', status);
     }
 
+    // 按角色过滤
+    query = filterQuotes(query, role as Role, actor);
+
     const { data, error, count } = await query;
 
     if (error) {
@@ -61,8 +58,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
 
     // 生成报价单编号（使用 Q- 前缀 + 上海时区 + 99上限）
     const quoteNumber = await numberGenerators.quote();

@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
+import { getUserIdentity, filterGoodsReceipts, type Role } from '@/lib/role-filter';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
-
-// 获取当前用户信息
-function getActorInfo(request: NextRequest): { actor: string; role: string } {
-  return {
-    actor: request.headers.get('X-Actor') || 'system',
-    role: request.headers.get('X-Role') || 'requester',
-  };
-}
 
 // GET /api/goods-receipts - 获取收货单列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const searchParams = request.nextUrl.searchParams;
     const grType = searchParams.get('grType');
     const poId = searchParams.get('poId');
@@ -37,6 +31,9 @@ export async function GET(request: NextRequest) {
     if (poId) {
       query = query.eq('po_id', parseInt(poId, 10));
     }
+
+    // 按角色过滤
+    query = filterGoodsReceipts(query, role as Role, actor);
 
     const { data, error, count } = await query;
 
@@ -59,8 +56,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = getUserIdentity(request);
     const body = await request.json();
-    const { actor, role } = getActorInfo(request);
 
     // 获取 PO 行信息
     const { data: poLine, error: poLineError } = await client

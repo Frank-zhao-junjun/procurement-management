@@ -30,21 +30,23 @@ export const prStatusEnum = pgEnum("pr_status", [
 // PR 行进度状态
 export const prLineProgressEnum = pgEnum("pr_line_progress", [
   "pending",           // 未审批
-  "approved",         // 已审批
+  "approved",          // 已审批
+  "pending_confirm",   // 待确认FA匹配
   "matched_protocol",  // 已匹配协议
   "sourced",          // 已寻源
-  "quoted",          // 已报价
-  "awarded",         // 已授标
-  "ordered",         // 已下单
-  "partial_received",// 部分收货
-  "received",        // 已收货
+  "quoted",           // 已报价
+  "awarded",          // 已授标
+  "ordered",          // 已下单
+  "partial_received", // 部分收货
+  "received",         // 已收货
   "return_pending",   // 退货待补货
 ]);
 
 // PR 行匹配确认结果
 export const matchConfirmEnum = pgEnum("match_confirm", [
-  "confirmed",    // 已确认匹配
-  "rejected",     // 拒绝匹配-按原文
+  "pending",     // 待确认
+  "confirmed",   // 已确认匹配
+  "rejected",    // 拒绝匹配
 ]);
 
 // 采购订单状态
@@ -188,13 +190,14 @@ export const purchaseRequestLines = pgTable(
     materialSnapshot: varchar("material_snapshot", { length: 255 }), // 物料名称快照
     requirementText: text("requirement_text").notNull(),    // 需求原文（口语化描述）
     matchConfirm: matchConfirmEnum("match_confirm"),          // 匹配确认结果
+    matchedFaId: integer("matched_fa_id").references(() => frameworkAgreements.id), // 匹配的FA ID
     quantity: decimal("quantity", { precision: 15, scale: 4 }).notNull(), // 数量
     estUnitPrice: decimal("est_unit_price", { precision: 15, scale: 4 }), // 预估单价
     expectedDeliveryDate: date("expected_delivery_date"),    // 期望交货日期
     progress: prLineProgressEnum("progress").default("pending"), // 最新进度
     sourcingTaskId: integer("sourcing_task_id"),             // 关联寻源任务ID
-    purchaseOrderId: integer("purchase_order_id"),          // 关联采购订单ID
-    poLineNumber: integer("po_line_number"),                // 关联PO行号
+    purchaseOrderId: integer("purchase_order_id"),           // 关联采购订单ID
+    poLineNumber: integer("po_line_number"),                 // 关联PO行号
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -371,6 +374,12 @@ export const goodsReceipts = pgTable(
     receiptTime: time("receipt_time"),                        // 收货时间（系统生成）
     receiver: varchar("receiver", { length: 100 }).notNull(), // 收货人
     notes: text("notes"),
+    // 超收相关字段
+    status: varchar("status", { length: 20 }).default("completed"), // completed/pending_approval/approved/rejected
+    isOverdelivery: boolean("is_overdelivery").default(false),
+    overdeliveryRatio: decimal("overdelivery_ratio", { precision: 5, scale: 4 }).default("0"),
+    approvedBy: varchar("approved_by", { length: 100 }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

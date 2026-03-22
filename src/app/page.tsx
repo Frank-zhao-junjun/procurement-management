@@ -157,61 +157,73 @@ export default function DashboardPage() {
       </Card>
 
       {/* Agent 指引 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent 使用指引</CardTitle>
+      <Card className="border-blue-200 bg-blue-50">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-blue-800 flex items-center gap-2">
+            <span>🤖</span> Agent 使用完整指引 (§9)
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">1</span>
+          <div className="space-y-4 text-sm">
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">1</span>
               <div>
-                <p className="font-medium">设置身份</p>
-                <p className="text-gray-500">在请求头中设置 X-Actor（身份标识）和 X-Role（角色：requester/manager/buyer）</p>
+                <p className="font-semibold text-gray-900">身份识别与权限 (§2.3)</p>
+                <p className="text-gray-600 mt-1">通过请求头传递身份：<code className="bg-gray-100 px-1 rounded">X-Actor: agent:user</code>（身份标识）和 <code className="bg-gray-100 px-1 rounded">X-Role: requester|manager|buyer</code>（角色）。需求人仅看自己的 PR，采购人可操作 PO/报价，Manager 可审批 PR 和超收。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">2</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">2</span>
               <div>
-                <p className="font-medium">采购申请流程</p>
-                <p className="text-gray-500">创建采购申请 → 提交申请 → Manager 审批 → 生成采购订单</p>
+                <p className="font-semibold text-gray-900">采购申请全流程 (§3.1, §4.1)</p>
+                <p className="text-gray-600 mt-1">创建 PR → 提交（POST /api/purchase-requests/[id]/submit）→ Manager 审批 → 系统自动匹配框架协议（上海时区有效期+最低价）→ 用户确认 FA 或拒绝 → 拒绝则自动创建寻源任务（SC）。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
               <div>
-                <p className="font-medium">寻源流程（可选）</p>
-                <p className="text-gray-500">创建寻源任务 → 录入报价 → 授标 → 生成采购订单</p>
+                <p className="font-semibold text-gray-900">寻源与报价 (§3.2, §3.3)</p>
+                <p className="text-gray-600 mt-1">寻源任务（SC）→ 录入多个报价单（Q-XXXXXX 编号）→ 授标（单一中标）→ 确认后创建 PO。报价可关联物料/供应商，支持价格有效期。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">4</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">4</span>
               <div>
-                <p className="font-medium">收货流程</p>
-                <p className="text-gray-500">收到货物后创建收货单，系统自动计算净收货数量和未收货数量</p>
+                <p className="font-semibold text-gray-900">采购订单与发送 (§3.5, 决策34)</p>
+                <p className="text-gray-600 mt-1">PO 创建后通过 <code className="bg-gray-100 px-1 rounded">POST /api/purchase-orders/[id]/send</code> 发送。发送失败自动进入重试队列（3次：1min/5min/10min），可调用 <code className="bg-gray-100 px-1 rounded">POST /api/purchase-orders/[id]/retry</code> 显式重试。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">5</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">5</span>
               <div>
-                <p className="font-medium">审计追踪</p>
-                <p className="text-gray-500">所有操作自动记录审计日志，可在审计日志页面查看</p>
+                <p className="font-semibold text-gray-900">收货与超收 (§3.6, §4.2)</p>
+                <p className="text-gray-600 mt-1">收货数量超过订单 5% 且非 Manager 操作时，进入待审批状态（pending_approval）。Manager 通过 <code className="bg-gray-100 px-1 rounded">POST /api/goods-receipts/[id]/approve-overdelivery</code> 审批。退货使用 gr_type=out，自动回冲净收货数量。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">6</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">6</span>
               <div>
-                <p className="font-medium">框架协议</p>
-                <p className="text-gray-500">采购员可创建框架协议，系统自动匹配已批准的采购申请行项目</p>
+                <p className="font-semibold text-gray-900">审计日志与追溯 (§8.3)</p>
+                <p className="text-gray-600 mt-1">所有关键操作（创建/提交/审批/发送/收货/超收审批）自动记录审计日志，包含操作者身份、角色、时间戳、变更详情。可通过 <code className="bg-gray-100 px-1 rounded">GET /api/audit-logs</code> 查询。</p>
               </div>
             </div>
-            <div className="flex items-start gap-3">
-              <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold flex-shrink-0">7</span>
+            <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
+              <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">7</span>
               <div>
-                <p className="font-medium">飞书集成（待实现）</p>
-                <p className="text-gray-500">支持飞书三应用（需求人/Manager/采购员）集成，HTTPS 发消息 + WebSocket 长连接</p>
+                <p className="font-semibold text-gray-900">编号规则与防重 (§6, 决策35)</p>
+                <p className="text-gray-600 mt-1">所有单据使用 Asia/Shanghai 时区，日流水号 01-99，第 100 次操作返回错误。前缀规则：PR-/SC-/Q-/FA-/PO-/GR-/RT-（退货）。报价单使用 Q-XXXXXX 全局序号。</p>
               </div>
             </div>
+          </div>
+          
+          {/* API 调用示例 */}
+          <div className="mt-6 p-4 bg-slate-800 rounded-lg text-slate-100 text-xs font-mono overflow-x-auto">
+            <p className="text-slate-400 mb-2">{'// Agent 调用示例'}</p>
+            <p>{'curl -X POST http://host/api/purchase-requests \\'}</p>
+            <p>{'  -H "Content-Type: application/json" \\'}</p>
+            <p>{'  -H "X-Actor: agent:user123" \\'}</p>
+            <p>{'  -H "X-Role: requester" \\'}</p>
+            <p>{'  -d \'{"reason":"产线急需M3螺栓500个","lines":[{"requirementText":"M3螺栓","quantity":500}]}\''}</p>
           </div>
         </CardContent>
       </Card>

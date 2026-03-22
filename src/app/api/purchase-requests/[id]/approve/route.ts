@@ -105,59 +105,78 @@ async function matchFrameworkAgreements(client: any, requestId: number) {
       .eq('request_id', requestId)
       .eq('progress', 'approved');
 
-    // 获取采购申请信息
-    const { data: pr } = await client
-      .from('purchase_requests')
-      .select('id')
-      .eq('id', requestId)
-      .single();
-
     for (const line of lines || []) {
-      // 获取有效期内的框架协议
-      const today = new Date().toISOString().slice(0, 10);
+      // 获取上海时区日期（用于 FA 有效期判断）
+      const todayShanghai = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
       
+      // 获取有效期内的框架协议（上海时区）
       const { data: agreements } = await client
         .from('framework_agreements')
         .select('*')
         .eq('status', 'active')
-        .lte('valid_from', today)
-        .gte('valid_to', today);
+        .lte('valid_from', todayShanghai)
+        .gte('valid_to', todayShanghai);
 
       let matched = false;
 
       if (agreements && agreements.length > 0) {
-        // 简单的文本匹配（实际应该使用更智能的匹配算法）
-        for (const fa of agreements) {
-          if (normalizeText(fa.material_original_text) === normalizeText(line.requirement_text)) {
-            // 找到匹配，更新行状态
-            await client
-              .from('purchase_request_lines')
-              .update({
-                progress: 'matched_protocol',
-                material_id: fa.material_id,
-                material_snapshot: fa.material_snapshot,
-                match_confirm: 'confirmed',
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', line.id);
+        // 1. 优先按 material_id 精确匹配
+        let idMatches = agreements.filter((fa: any) => fa.material_id === line.material_id);
+        
+        // 2. 次级按原文归一相等匹配
+        let textMatches = agreements.filter((fa: any) => 
+          normalizeText(fa.material_original_text || '') === normalizeText(line.requirement_text || '')
+        );
 
-            matched = true;
-            
-            // 记录审计日志
-            await client.from('audit_logs').insert({
-              entity_type: 'purchase_request_line',
-              entity_id: line.id,
-              action: 'match_fa',
-              actor: 'system',
-              actor_role: 'system',
-              detail: {
+        // 合并结果（去重），优先 ID 匹配
+        const allMatches = [...idMatches, ...textMatches.filter((fa: any) => 
+          !idMatches.some((m: any) => m.id === fa.id)
+        )];
+
+        if (allMatches.length > 0) {
+          // 按价格升序，取最低价
+          allMatches.sort((a, b) => parseFloat(a.unit_price) - parseFloat(b.unit_price));
+          const best = allMatches[0];
+          
+          // 标记为待确认（不是静默 confirmed）
+          await client
+            .from('purchase_request_lines')
+            .update({
+              progress: 'pending_confirm',  // 待确认状态
+              material_id: best.material_id,
+              material_snapshot: best.material_snapshot,
+              match_confirm: 'pending',  // 等待用户确认
+              matched_fa_id: best.id,   // 记录匹配的 FA
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', line.id);
+
+          matched = true;
+
+          // 返回 Top-3 备选供用户选择（记录到审计日志）
+          const top3 = allMatches.slice(0, 3);
+          await client.from('audit_logs').insert({
+            entity_type: 'purchase_request_line',
+            entity_id: line.id,
+            action: 'fa_candidates',
+            actor: 'system',
+            actor_role: 'system',
+            detail: {
+              candidates: top3.map((fa: any) => ({
                 fa_id: fa.id,
                 fa_number: fa.fa_number,
-                unit_price: fa.unit_price,
-              },
-            });
-            break;
-          }
+                supplier_snapshot: fa.supplier_snapshot,
+                unit_price: parseFloat(fa.unit_price),
+              })),
+              recommended_fa_id: best.id,
+              match_type: idMatches.length > 0 ? 'material_id' : 'text',
+            },
+          });
         }
       }
 
