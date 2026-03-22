@@ -41,6 +41,11 @@ const menuItems = [
     icon: '🔍',
   },
   {
+    title: '报价单',
+    href: '/quotes',
+    icon: '💰',
+  },
+  {
     title: '收货管理',
     href: '/goods-receipts',
     icon: '📥',
