@@ -62,7 +62,24 @@ POST /api/purchase-requests
 - **报价单 (Quote)** - 多供应商竞价
 - **采购订单 (PO)** - 生成、发送、重试
 - **收货单 (GR)** - 标准收货、超收审批、退货
-- **审计日志** - 全操作记录
+- **审计日志** - 全操作记录（含 system 角色）
+- **Dashboard** - 实时统计概览
+
+## 功能特性
+
+### 搜索与筛选
+
+- **物料/供应商搜索** - 支持按名称、编码、联系人模糊搜索
+- **PO 状态筛选** - 按草稿/已发送/部分收货/已收货/已取消筛选
+- **PR 状态筛选** - 按草稿/待审批/已审批/已拒绝筛选
+
+### Dashboard 统计
+
+实时显示关键业务指标：
+- PR 总数及待审批数量
+- PO 总数及待发货数量
+- 供应商总数
+- 物料总数
 
 ## Agent-first 模型
 
@@ -71,7 +88,11 @@ POST /api/purchase-requests
 ```
 
 - **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
-- **角色固定**：`requester` / `buyer` / `manager`
+- **角色类型**：
+  - `requester` - 需求人
+  - `buyer` - 采购员
+  - `manager` - 审批人/经理
+  - `system` - 系统操作（审计日志专用）
 - **Webhook 通知**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
 
 ## Webhook 事件通知
@@ -90,6 +111,7 @@ Manager Agent 可通过 `webhookUrl` 接收系统事件通知：
 | `requester` | PR | 自己PR对应数据 | - |
 | `buyer` | PO, Quote, SC, FA | 所有采购数据 | - |
 | `manager` | - | 所有数据 | PR, 超收收货 |
+| `system` | - | - | -（仅审计日志） |
 
 ## 已知兼容性说明（PostgREST schema cache）
 
@@ -107,25 +129,27 @@ Manager Agent 可通过 `webhookUrl` 接收系统事件通知：
 src/
 ├── app/
 │   ├── api/                  # API 路由
-│   │   ├── materials/
-│   │   ├── suppliers/
-│   │   ├── purchase-requests/
-│   │   ├── purchase-orders/
-│   │   ├── goods-receipts/
+│   │   ├── materials/        # 物料 CRUD + 搜索
+│   │   ├── suppliers/        # 供应商 CRUD + 搜索
+│   │   ├── purchase-requests/# PR 全流程
+│   │   ├── purchase-orders/  # PO 全流程 + 状态筛选
+│   │   ├── goods-receipts/   # 收货 + 超收审批
 │   │   ├── framework-agreements/
 │   │   ├── sourcing-tasks/
 │   │   ├── quotes/
-│   │   └── audit-logs/
+│   │   ├── audit-logs/       # 审计日志查询
+│   │   └── agent-bindings/   # Agent 注册
 │   └── ...                   # 页面路由
 ├── components/
 │   └── ui/                   # shadcn/ui 组件
 ├── lib/
-│   ├── api.ts                # API 客户端
+│   ├── api.ts                # API 客户端（含搜索参数）
 │   └── role-filter.ts        # 角色权限过滤
 └── storage/
     └── database/
-        ├── schema.ts         # 数据库 Schema
-        ├── number-generator.ts    # 单据编号生成
+        ├── shared/
+        │   └── schema.ts     # 数据库 Schema（含 system 角色）
+        ├── number-generator.ts    # 单据编号生成（FA 字段已修正）
         ├── fa-matcher.ts         # FA 智能匹配
         ├── po-sender.ts          # PO 发送与重试
         └── agent-binding.ts      # Agent 注册与 webhook 获取
@@ -147,9 +171,36 @@ src/
 | `purchase_orders` | 采购订单 |
 | `purchase_order_lines` | 采购订单行 |
 | `goods_receipts` | 收货单 |
-| `audit_logs` | 审计日志 |
+| `audit_logs` | 审计日志（含 system 角色） |
 | `agent_bindings` | Agent 注册（agent_id + role + webhook_url） |
-| `po_send_failures` | PO 发送失败记录 |
+| `po_send_failures` | PO 发送失败记录（重试队列） |
+| `feishu_notifications` | 飞书通知记录 |
+
+### 数据库 Migration
+
+```bash
+# 执行 migration
+psql $DATABASE_URL < drizzle/0001_agent_bindings.sql
+psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
+```
+
+## 最近更新
+
+### v1.1.0 (2024-03-23)
+
+**修复问题：**
+- ✅ 修复 `actor_role` 枚举缺失 `system` 值，审计日志插入正常
+- ✅ 修复 `po_send_failures` 和 `feishu_notifications` 表缺失问题
+- ✅ 修复 FA 取号字段映射错误（`agreement_number` → `fa_number`）
+- ✅ 修复 PO 状态筛选不生效问题
+- ✅ 修复物料/供应商搜索参数未传递问题
+- ✅ 修复 Dashboard 统计数据恒为 0 问题
+- ✅ 更新 migration 文件，添加完整的 DDL 语句
+
+**改进：**
+- Dashboard 实时统计（PR/PO/供应商/物料数量）
+- PO 列表页状态筛选重置分页
+- 搜索框输入后重置分页
 
 ## 文档
 
