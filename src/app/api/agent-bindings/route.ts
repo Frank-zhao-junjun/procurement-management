@@ -41,11 +41,11 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/agent-bindings - 注册 Agent 或创建绑定
-// Body: { agentId, role, feishuUserId?, feishuOpenId?, feishuUnionId?, feishuAppId? }
+// Body: { agentId, role, webhookUrl?, feishuUserId?, feishuOpenId?, feishuUnionId?, feishuAppId? }
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { agentId, role, feishuUserId, feishuOpenId, feishuUnionId, feishuAppId } = body;
+    const { agentId, role, webhookUrl, feishuUserId, feishuOpenId, feishuUnionId, feishuAppId } = body;
 
     if (!agentId || !role) {
       return NextResponse.json(
@@ -61,6 +61,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 验证 webhookUrl 格式（如果是 http/https）
+    if (webhookUrl && !webhookUrl.startsWith('http')) {
+      return NextResponse.json(
+        { error: 'webhookUrl 必须以 http:// 或 https:// 开头' },
+        { status: 400 }
+      );
+    }
+
     const result = feishuUserId
       ? await createOrUpdateAgent(agentId, role, {
           feishuUserId,
@@ -68,7 +76,7 @@ export async function POST(request: NextRequest) {
           feishuUnionId,
           feishuAppId,
         })
-      : await registerAgent(agentId, role);
+      : await registerAgent(agentId, role as Role, webhookUrl);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 });

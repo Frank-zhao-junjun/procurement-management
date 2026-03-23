@@ -21,6 +21,7 @@ interface AgentBinding {
   feishu_open_id: string | null;
   feishu_app_id: string | null;
   feishu_union_id: string | null;
+  webhook_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string | null;
@@ -29,7 +30,8 @@ interface AgentBinding {
 // 注册新 Agent（仅角色，无飞书绑定）
 export async function registerAgent(
   agentId: string,
-  role: Role
+  role: Role,
+  webhookUrl?: string
 ): Promise<{ success: boolean; bindingId?: number; error?: string }> {
   const client = getSupabaseClient();
 
@@ -42,12 +44,19 @@ export async function registerAgent(
 
   if (existing) {
     if (existing.is_active) {
+      // 已激活时更新 webhook_url
+      if (webhookUrl !== undefined) {
+        await client
+          .from('agent_bindings')
+          .update({ webhook_url: webhookUrl, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+      }
       return { success: true, bindingId: existing.id, error: 'Agent already registered' };
     }
     // 重新激活已有记录
     const { data, error } = await client
       .from('agent_bindings')
-      .update({ role, is_active: true, updated_at: new Date().toISOString() })
+      .update({ role, is_active: true, webhook_url: webhookUrl || null, updated_at: new Date().toISOString() })
       .eq('id', existing.id)
       .select('id')
       .single();
@@ -59,7 +68,7 @@ export async function registerAgent(
   // 创建新记录
   const { data, error } = await client
     .from('agent_bindings')
-    .insert({ agent_id: agentId, role, is_active: true })
+    .insert({ agent_id: agentId, role, is_active: true, webhook_url: webhookUrl || null })
     .select('id')
     .single();
 
@@ -205,6 +214,14 @@ export async function getByRole(role: Role): Promise<AgentBinding[]> {
 
   if (error) return [];
   return (data || []) as AgentBinding[];
+}
+
+// 获取所有有 Webhook URL 的 Manager Agent
+export async function getManagerWebhooks(): Promise<string[]> {
+  const bindings = await getByRole('manager');
+  return bindings
+    .filter(b => b.webhook_url)
+    .map(b => b.webhook_url as string);
 }
 
 // 获取所有活跃绑定

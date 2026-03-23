@@ -25,6 +25,14 @@ Content-Type: application/json
   "role": "buyer"
 }
 
+# 注册并配置 Webhook（用于接收 PR 提交通知）
+POST /api/agent-bindings
+{
+  "agentId": "my-manager-agent",
+  "role": "manager",
+  "webhookUrl": "https://your-server.com/webhook"
+}
+
 # 注册并绑定飞书
 POST /api/agent-bindings
 {
@@ -33,6 +41,43 @@ POST /api/agent-bindings
   "feishuUserId": "ou_xxx"
 }
 ```
+
+## Webhook 通知
+
+Manager Agent 可以配置 Webhook URL 接收实时通知。
+
+### PR 提交通知
+
+当有采购申请提交时，系统会向所有 Manager Agent 的 Webhook URL 发送 POST 请求：
+
+```json
+{
+  "event": "pr_submitted",
+  "prId": 1,
+  "prNumber": "PR-20250401-01",
+  "submittedBy": "requester-agent",
+  "submittedAt": "2025-04-01T10:30:00+08:00"
+}
+```
+
+**前提条件**：
+- Agent 必须注册时提供 `webhookUrl`
+- Agent 角色必须为 `manager`
+- Webhook URL 必须可被公网访问（https:// 或 http://）
+
+### Webhook 请求头
+
+```http
+POST /your-webhook-url HTTP/1.1
+Content-Type: application/json
+User-Agent: ProcurementSystem-Webhook/1.0
+```
+
+### 响应要求
+
+- 返回 2xx 状态码表示成功
+- 超时时间：10 秒
+- 支持重试（由调用方负责）
 
 ### 2. 调用 API
 
