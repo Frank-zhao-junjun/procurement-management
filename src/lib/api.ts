@@ -11,8 +11,23 @@ interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
+/**
+ * 构建 API URL
+ * 
+ * 注意：不能使用 new URL(endpoint, base) 的方式，因为：
+ * - 当 endpoint 以 '/' 开头时，URL 构造函数会将其视为绝对路径，替换掉 base 的路径部分
+ * - 例如：new URL('/purchase-requests', 'http://localhost:5000/api') 
+ *   结果是 'http://localhost:5000/purchase-requests'（丢失了 /api）
+ * 
+ * 正确做法：直接拼接字符串
+ */
 function buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(endpoint, window.location.origin + API_BASE);
+  // 确保 endpoint 不以 / 开头（如果有则去掉）
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  const baseUrl = `${window.location.origin}${API_BASE}/${normalizedEndpoint}`;
+  
+  const url = new URL(baseUrl);
+  
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
