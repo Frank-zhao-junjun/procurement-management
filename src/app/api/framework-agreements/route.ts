@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         supplier_snapshot: supplierSnapshot,
         material_id: body.materialId || null,
         material_snapshot: materialSnapshot,
-        material_original_text: body.materialOriginalText,
+        material_original_text: body.materialOriginalText || materialSnapshot,
         match_confirm: 'confirmed',
         unit_price: body.unitPrice,
         valid_from: body.validFrom,

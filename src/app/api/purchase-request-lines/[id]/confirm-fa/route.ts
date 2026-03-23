@@ -180,6 +180,7 @@ async function createPOFromFAMatch(
         supplier_snapshot: fa.supplier_snapshot,
         delivery_date: deliveryDate,
         status: 'draft',
+        created_by: actor,
       })
       .select()
       .single();
