@@ -70,19 +70,16 @@ export default function NewPurchaseRequestPage() {
 
     try {
       setLoading(true);
-      const result = await purchaseRequestsApi.create(
-        {
-          reason,
-          lines: lines.map((l) => ({
-            requirementText: l.requirementText,
-            quantity: parseFloat(l.quantity) || 0,
-            estUnitPrice: l.estUnitPrice ? parseFloat(l.estUnitPrice) : null,
-            expectedDeliveryDate: l.expectedDeliveryDate || null,
-            note: l.note || null,
-          })),
-        },
-        'agent:user'
-      );
+      const result = await purchaseRequestsApi.create({
+        reason,
+        lines: lines.map((l) => ({
+          requirementText: l.requirementText,
+          quantity: parseFloat(l.quantity) || 0,
+          estUnitPrice: l.estUnitPrice ? parseFloat(l.estUnitPrice) : null,
+          expectedDeliveryDate: l.expectedDeliveryDate || null,
+          note: l.note || null,
+        })),
+      });
       router.push(`/purchase-requests/${result.data.id}`);
     } catch (error: any) {
       alert(error.message || '创建失败');

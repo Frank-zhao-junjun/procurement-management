@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('framework_agreements')
-      .select('*, suppliers(name), materials(name)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 

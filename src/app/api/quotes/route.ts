@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('quotes')
-      .select('*, sourcing_tasks(task_number), suppliers(name), materials(name)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 

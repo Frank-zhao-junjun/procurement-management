@@ -8,10 +8,10 @@ import { getIdentityHeaders } from './identity-store';
 const API_BASE = '/api';
 
 interface RequestOptions extends RequestInit {
-  params?: Record<string, string | number | undefined>;
+  params?: Record<string, string | number | boolean | undefined>;
 }
 
-function buildUrl(endpoint: string, params?: Record<string, string | number | undefined>): string {
+function buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
   const url = new URL(endpoint, window.location.origin + API_BASE);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
@@ -87,7 +87,7 @@ export const purchaseRequestsApi = {
 
 // 采购订单 API
 export const purchaseOrdersApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; status?: string }) =>
     api.get<{ data: any[]; total: number }>('/purchase-orders', params),
 
   get: (id: number) =>
@@ -98,6 +98,9 @@ export const purchaseOrdersApi = {
 
   send: (id: number) =>
     api.post<{ data: any }>(`/purchase-orders/${id}/send`),
+
+  updateStatus: (id: number, status: string) =>
+    api.post<{ data: any }>(`/purchase-orders/${id}/status`, { status }),
 };
 
 // 供应商 API
@@ -110,6 +113,9 @@ export const suppliersApi = {
 
   create: (data: any) =>
     api.post<{ data: any }>('/suppliers', data),
+
+  delete: (id: number) =>
+    api.delete(`/suppliers/${id}`),
 };
 
 // 物料 API
@@ -122,11 +128,14 @@ export const materialsApi = {
 
   create: (data: any) =>
     api.post<{ data: any }>('/materials', data),
+
+  delete: (id: number) =>
+    api.delete(`/materials/${id}`),
 };
 
 // 框架协议 API
 export const frameworkAgreementsApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; status?: string }) =>
     api.get<{ data: any[]; total: number }>('/framework-agreements', params),
 
   get: (id: number) =>
@@ -135,14 +144,17 @@ export const frameworkAgreementsApi = {
 
 // 寻源任务 API
 export const sourcingTasksApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; status?: string }) =>
     api.get<{ data: any[]; total: number }>('/sourcing-tasks', params),
 };
 
 // 报价单 API
 export const quotesApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; status?: string }) =>
     api.get<{ data: any[]; total: number }>('/quotes', params),
+
+  create: (data: any) =>
+    api.post<{ data: any }>('/quotes', data),
 };
 
 // 收货单 API

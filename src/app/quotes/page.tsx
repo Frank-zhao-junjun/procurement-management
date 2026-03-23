@@ -66,8 +66,8 @@ export default function QuotesPage() {
       try {
         const [tasksData, suppliersData, materialsData] = await Promise.all([
           sourcingTasksApi.list({ status: 'in_progress', pageSize: 100 }),
-          suppliersApi.list({ isActive: true, pageSize: 100 }),
-          materialsApi.list({ isActive: true, pageSize: 100 }),
+          suppliersApi.list({ pageSize: 100 }),
+          materialsApi.list({ pageSize: 100 }),
         ]);
         setSourcingTasks(tasksData.data || []);
         setSuppliers(suppliersData.data || []);
@@ -86,7 +86,7 @@ export default function QuotesPage() {
 
   const handleCreateQuote = async () => {
     try {
-      const result = await quotesApi.create({
+      await quotesApi.create({
         sourcingTaskId: parseInt(newQuote.sourcingTaskId),
         supplierId: parseInt(newQuote.supplierId),
         materialId: newQuote.materialId ? parseInt(newQuote.materialId) : null,
@@ -94,7 +94,7 @@ export default function QuotesPage() {
         quantity: parseFloat(newQuote.quantity),
         validUntil: newQuote.validUntil || null,
         notes: newQuote.notes || null,
-      }, 'agent:buyer');
+      });
 
       setShowNewForm(false);
       setNewQuote({
