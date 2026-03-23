@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, canCreatePO, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 
 // PUT /api/purchase-request-lines/[id]/confirm-fa - 确认 FA 匹配并创建 PO
 export async function PUT(
@@ -11,7 +11,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     const confirmed = body.confirmed !== false;
@@ -168,8 +168,8 @@ async function createPOFromFAMatch(
     // 生成 PO 编号
     const poNumber = await numberGenerators.po();
 
-    // 获取 PR 行自己的期望交货日期
-    let deliveryDate = prLine.expectedDeliveryDate;
+    // 获取 PR 行自己的期望交货日期（Supabase 返回 snake_case）
+    let deliveryDate = prLine.expected_delivery_date ?? prLine.expectedDeliveryDate;
 
     // 创建 PO
     const { data: po, error: poError } = await client

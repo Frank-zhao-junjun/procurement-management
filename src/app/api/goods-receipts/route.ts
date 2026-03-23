@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
-import { getUserIdentity, filterGoodsReceipts, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, filterGoodsReceipts, type Role } from '@/lib/role-filter';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
@@ -10,7 +10,7 @@ const OVERDELIVERY_THRESHOLD = 0.05;
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const grType = searchParams.get('grType');
     const poId = searchParams.get('poId');
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     // 获取 PO 行信息

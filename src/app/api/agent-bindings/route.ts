@@ -1,27 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  registerAgent,
+  createOrUpdateAgent,
+  getByAgentId,
   getByFeishuUserId,
   getByRole,
   getAllActive,
-  createOrUpdateAgent,
   type Role,
 } from '@/storage/database/agent-binding';
 
-// GET /api/feishu-bindings（兼容旧 API，建议使用 /api/agent-bindings）
+// GET /api/agent-bindings
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const entry = searchParams.get('entry') as Role | null;
+    const agentId = searchParams.get('agentId');
     const feishuUserId = searchParams.get('feishuUserId');
+    const role = searchParams.get('role') as Role | null;
+
+    if (agentId) {
+      const binding = await getByAgentId(agentId);
+      return NextResponse.json({ data: binding });
+    }
 
     if (feishuUserId) {
       const binding = await getByFeishuUserId(feishuUserId);
       return NextResponse.json({ data: binding });
     }
 
-    if (entry && ['requester', 'manager', 'buyer'].includes(entry)) {
-      const bindings = await getByRole(entry);
-      return NextResponse.json({ data: bindings[0] ?? null });
+    if (role && ['requester', 'manager', 'buyer'].includes(role)) {
+      const bindings = await getByRole(role);
+      return NextResponse.json({ data: bindings });
     }
 
     const bindings = await getAllActive();
@@ -32,33 +40,35 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/feishu-bindings（兼容旧 API：feishuUserId + entry，隐式创建 agentId）
-// 新实现：agentId = feishu:{feishuUserId}，role = entry
+// POST /api/agent-bindings - 注册 Agent 或创建绑定
+// Body: { agentId, role, feishuUserId?, feishuOpenId?, feishuUnionId?, feishuAppId? }
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { feishuUserId, feishuOpenId, feishuUnionId, entry } = body;
+    const { agentId, role, feishuUserId, feishuOpenId, feishuUnionId, feishuAppId } = body;
 
-    if (!feishuUserId || !entry) {
+    if (!agentId || !role) {
       return NextResponse.json(
-        { error: 'feishuUserId 和 entry 为必填' },
+        { error: 'agentId 和 role 为必填' },
         { status: 400 }
       );
     }
 
-    if (!['requester', 'manager', 'buyer'].includes(entry)) {
+    if (!['requester', 'manager', 'buyer'].includes(role)) {
       return NextResponse.json(
-        { error: 'entry 必须为 requester、manager 或 buyer' },
+        { error: 'role 必须为 requester、manager 或 buyer' },
         { status: 400 }
       );
     }
 
-    const agentId = `feishu:${feishuUserId}`;
-    const result = await createOrUpdateAgent(agentId, entry as Role, {
-      feishuUserId,
-      feishuOpenId,
-      feishuUnionId,
-    });
+    const result = feishuUserId
+      ? await createOrUpdateAgent(agentId, role, {
+          feishuUserId,
+          feishuOpenId,
+          feishuUnionId,
+          feishuAppId,
+        })
+      : await registerAgent(agentId, role);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 });

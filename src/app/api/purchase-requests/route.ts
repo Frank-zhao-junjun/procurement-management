@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { z } from 'zod';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, filterPurchaseRequests, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, filterPurchaseRequests, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-requests - 获取采购申请列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
     const applicant = searchParams.get('applicant');
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     // 生成 PR 编号（使用上海时区 + 99上限）

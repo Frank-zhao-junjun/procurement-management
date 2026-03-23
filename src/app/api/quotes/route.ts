@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, filterQuotes, type Role } from '@/lib/role-filter';
+import { insertQuoteSchema } from '@/storage/database/shared/schema';
+import { getUserIdentityWithLookup, filterQuotes, type Role } from '@/lib/role-filter';
 
 // GET /api/quotes - 获取报价单列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const sourcingTaskId = searchParams.get('sourcingTaskId');
     const supplierId = searchParams.get('supplierId');
@@ -54,64 +55,67 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/quotes - 创建报价单
+// POST /api/quotes - 创建报价单（仅 buyer/manager）
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 生成报价单编号（使用 Q- 前缀 + 上海时区 + 99上限）
+    if (role !== 'buyer' && role !== 'manager') {
+      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建报价单' }, { status: 403 });
+    }
+
+    const parsed = insertQuoteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
     const quoteNumber = await numberGenerators.quote();
 
-    // 计算总价
-    const quantity = parseFloat(body.quantity || '0');
-    const unitPrice = parseFloat(body.unitPrice || '0');
+    const quantity = parseFloat(String(parsed.data.quantity || '0'));
+    const unitPrice = parseFloat(String(parsed.data.unitPrice || '0'));
     const totalPrice = quantity * unitPrice;
 
-    // 获取供应商快照
-    let supplierSnapshot = body.supplierSnapshot || '';
-    if (body.supplierId) {
+    let supplierSnapshot = parsed.data.supplierSnapshot || '';
+    if (parsed.data.supplierId) {
       const { data: supplier } = await client
         .from('suppliers')
         .select('name')
-        .eq('id', body.supplierId)
+        .eq('id', parsed.data.supplierId)
         .single();
-      if (supplier) {
-        supplierSnapshot = supplier.name;
-      }
+      if (supplier) supplierSnapshot = supplier.name;
     }
 
-    // 获取物料快照
-    let materialSnapshot = body.materialSnapshot || '';
-    if (body.materialId) {
+    let materialSnapshot = parsed.data.materialSnapshot || '';
+    if (parsed.data.materialId) {
       const { data: material } = await client
         .from('materials')
         .select('name')
-        .eq('id', body.materialId)
+        .eq('id', parsed.data.materialId)
         .single();
-      if (material) {
-        materialSnapshot = material.name;
-      }
+      if (material) materialSnapshot = material.name;
     }
 
-    // 插入数据
     const { data: quote, error } = await client
       .from('quotes')
       .insert({
         quote_number: quoteNumber,
-        sourcing_task_id: body.sourcingTaskId,
-        supplier_id: body.supplierId,
+        sourcing_task_id: parsed.data.sourcingTaskId,
+        supplier_id: parsed.data.supplierId,
         supplier_snapshot: supplierSnapshot,
-        material_id: body.materialId || null,
+        material_id: parsed.data.materialId ?? null,
         material_snapshot: materialSnapshot,
-        unit_price: body.unitPrice,
-        quantity: body.quantity,
+        unit_price: parsed.data.unitPrice,
+        quantity: parsed.data.quantity,
         total_price: totalPrice,
-        valid_until: body.validUntil || null,
+        valid_until: parsed.data.validUntil ?? null,
         status: 'draft',
         awarded: 'pending',
-        notes: body.notes || null,
+        notes: parsed.data.notes ?? null,
         created_by: actor,
       })
       .select()

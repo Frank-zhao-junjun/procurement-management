@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { retryPOSend, explicitRetryPOSend } from '@/storage/database/po-sender';
-import { getUserIdentity, canCreatePO, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders/[id]/retry - 获取 PO 重试状态
 export async function GET(
@@ -49,7 +49,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 只有 buyer 和 manager 可以重试
     if (!canCreatePO(role as Role)) {

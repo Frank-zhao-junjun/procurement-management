@@ -1,22 +1,75 @@
 /**
  * 角色权限过滤工具 (§2.4)
- * 规则：
- * - 需求人（requester）：只能看自己创建的 PR
- * - 采购人（buyer）：只能看自己创建的 PO/SC/Quotes
- * - 审批人（manager）：可以看所有需要审批的内容
+ * 
+ * Agent-first 模型：
+ * - 每个 Agent 有唯一 agent_id 和固定 role
+ * - 调用 API 时只需传 X-Actor: agent_id，无需每次传 X-Role
+ * - 系统从 agent_bindings 表查询该 agent_id 对应的 role
+ * - 显式传 X-Role 时优先使用
  */
 
 import { NextRequest } from 'next/server';
+import { resolveRoleByAgentId, type Role } from '@/storage/database/agent-binding';
 
 // 角色类型
-export type Role = 'requester' | 'buyer' | 'manager';
+export type UserRole = 'requester' | 'buyer' | 'manager';
 
-// 获取用户身份
-export function getUserIdentity(request: NextRequest): { actor: string; role: Role } {
-  return {
-    actor: request.headers.get('X-Actor') || 'anonymous',
-    role: (request.headers.get('X-Role') as Role) || 'requester',
-  };
+/**
+ * 获取用户身份与角色（Agent-first）
+ * 
+ * 1. 优先使用显式传递的 X-Role
+ * 2. 否则从 agent_bindings 表查询 X-Actor 对应的 role
+ * 3. 都未提供则默认 requester
+ */
+export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
+  const actor = request.headers.get('X-Actor') || 'anonymous';
+  let role = request.headers.get('X-Role') as UserRole | null;
+
+  // 如果未显式传递角色，从 agent_bindings 查询
+  if (!role) {
+    role = await resolveRoleByAgentId(actor);
+  }
+
+  // 验证角色有效性
+  if (!role || !['requester', 'buyer', 'manager'].includes(role)) {
+    role = 'requester'; // 默认降级为 requester
+  }
+
+  return { actor, role };
+}
+
+// 向后兼容别名
+export const getUserIdentityWithLookup = getUserIdentity;
+
+// 保持向后兼容
+export { type Role } from '@/storage/database/agent-binding';
+
+/**
+ * 获取需求人可访问的 PO ID 列表
+ * 需求人只能看自己 PR 对应的 PO
+ */
+export async function getRequesterAccessiblePOIds(client: any, actor: string): Promise<number[]> {
+  // 查询该需求人创建的 PR
+  const { data: prs } = await client
+    .from('purchase_requests')
+    .select('id')
+    .eq('applicant', actor);
+
+  if (!prs || prs.length === 0) return [];
+
+  const prIds = prs.map((pr: any) => pr.id);
+
+  // 查询这些 PR 对应的 PO
+  const { data: poLines } = await client
+    .from('purchase_order_lines')
+    .select('order_id')
+    .in('pr_id', prIds);
+
+  if (!poLines || poLines.length === 0) return [];
+
+  // 去重
+  const ids = poLines.map((line: any) => line.order_id as number);
+  return Array.from(new Set(ids));
 }
 
 /**

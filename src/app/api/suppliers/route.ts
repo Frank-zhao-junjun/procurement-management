@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { insertSupplierSchema } from '@/storage/database/shared/schema';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/suppliers - 获取供应商列表
 export async function GET(request: NextRequest) {
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     // 仅 buyer 和 manager 可创建供应商
@@ -67,9 +67,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const insertData = {
+      code: parsed.data.code,
+      name: parsed.data.name,
+      contact: parsed.data.contact,
+      email: parsed.data.email,
+      phone: parsed.data.phone,
+      address: parsed.data.address,
+      note: parsed.data.note,
+      is_active: parsed.data.isActive,
+    };
+
     const { data: supplier, error } = await client
       .from('suppliers')
-      .insert(parsed.data)
+      .insert(insertData)
       .select()
       .single();
 

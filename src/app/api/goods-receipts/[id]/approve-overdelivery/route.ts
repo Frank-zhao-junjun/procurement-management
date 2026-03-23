@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // POST /api/goods-receipts/[id]/approve-overdelivery - 审批超收收货单
 export async function POST(
@@ -11,7 +11,7 @@ export async function POST(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 只有 manager 可以审批
     if (role !== 'manager') {
@@ -43,14 +43,21 @@ export async function POST(
         })
         .eq('id', parseInt(id, 10));
 
-      // 更新 PO 行
+      // 更新 PO 行：审批通过后把本次收货量加入已收货
       const poLine = gr.purchase_order_lines;
+      const oldReceived = parseFloat(poLine?.received_qty || '0');
+      const orderQty = parseFloat(poLine?.quantity || '0');
+      const grQty = parseFloat(gr.quantity || '0');
+      const newReceivedQty = oldReceived + grQty;
+      const pendingQty = Math.max(0, orderQty - newReceivedQty);
+      const lineStatus = pendingQty === 0 ? 'received' : 'partial_received';
+
       await client
         .from('purchase_order_lines')
         .update({
-          received_qty: gr.received_qty || (parseFloat(poLine.received_qty) + parseFloat(gr.quantity)),
-          pending_qty: Math.max(0, parseFloat(poLine.quantity) - (parseFloat(poLine.received_qty) + parseFloat(gr.quantity))),
-          status: 'received',
+          received_qty: newReceivedQty,
+          pending_qty: pendingQty,
+          status: lineStatus,
           updated_at: new Date().toISOString(),
         })
         .eq('id', gr.po_line_id);

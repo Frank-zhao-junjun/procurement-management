@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { materials, insertMaterialSchema, auditLogs } from '@/storage/database/shared/schema';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 import { z } from 'zod';
 
 // GET /api/materials - 获取物料列表
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     // 仅 buyer 和 manager 可创建物料
@@ -68,9 +68,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 转为 snake_case 以匹配 Supabase/PostgreSQL 列名
+    const insertData = {
+      code: parsed.data.code,
+      name: parsed.data.name,
+      unit: parsed.data.unit,
+      is_active: parsed.data.isActive,
+    };
+
     const { data: material, error } = await client
       .from('materials')
-      .insert(parsed.data)
+      .insert(insertData)
       .select()
       .single();
 

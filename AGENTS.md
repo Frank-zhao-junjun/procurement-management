@@ -2,18 +2,56 @@
 
 本系统面向 Agent 设计，支持通过 HTTP API 进行全流程采购管理。
 
-## 身份识别
+## Agent-first 模型
 
-Agent 通过请求头传递身份信息：
+```
+一个飞书账号 ↔ 一个 Agent ↔ 一个角色
+```
+
+- **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
+- **飞书可选**：飞书用户可绑定到已有 Agent；也可直接使用 Agent
+- **一对一**：一个飞书账号只能绑定一个 Agent
+
+## 快速开始
+
+### 1. 注册 Agent
+
+```bash
+# 注册仅角色的 Agent
+POST /api/agent-bindings
+Content-Type: application/json
+{
+  "agentId": "my-procurement-agent",
+  "role": "buyer"
+}
+
+# 注册并绑定飞书
+POST /api/agent-bindings
+{
+  "agentId": "my-procurement-agent",
+  "role": "buyer",
+  "feishuUserId": "ou_xxx"
+}
+```
+
+### 2. 调用 API
+
+```bash
+# 只需传 X-Actor，系统自动解析角色
+curl -X POST http://localhost:5000/api/purchase-requests \
+  -H "Content-Type: application/json" \
+  -H "X-Actor: my-procurement-agent" \
+  -d '{"reason":"采购办公用品","lines":[{"requirementText":"A4纸","quantity":100}]}'
+```
+
+## 身份识别
 
 | 请求头 | 说明 | 可选值 |
 |--------|------|--------|
-| `X-Actor` | 身份标识 | `agent:user123`, `manager`, `buyer` 等 |
-| `X-Role` | 角色 | `requester`, `buyer`, `manager` |
+| `X-Actor` | Agent 标识（必填） | `my-agent`, `coze_bot_001` 等 |
+| `X-Role` | 角色（可选） | `requester`, `buyer`, `manager` |
 
-```bash
-curl -H "X-Actor: agent:user123" -H "X-Role: requester" ...
-```
+**注意**：不传 `X-Role` 时，系统从 `agent_bindings` 表查询该 Agent 的角色。
 
 ## 角色权限
 
@@ -57,7 +95,7 @@ GET /api/purchase-request-lines/{id}/match?topN=3
 
 # 确认 FA 匹配
 PUT /api/purchase-request-lines/{id}/confirm-fa
-{"faId": 1, "confirmed": true}
+{"faId": 1, "confirmed": true, "autoCreatePO": false}
 
 # 拒绝并创建寻源任务
 PUT /api/purchase-request-lines/{id}/confirm-fa
@@ -123,12 +161,9 @@ POST /api/goods-receipts
 ### 6. 飞书绑定
 
 ```bash
-# 自助绑定（无需工号邮箱）
-POST /api/feishu-bindings
-{"feishuUserId": "ou_xxx", "entry": "requester"}
-
-# 获取绑定状态
-GET /api/feishu-bindings?feishuUserId=ou_xxx
+# 查询绑定状态
+GET /api/agent-bindings?agentId=my-agent
+GET /api/agent-bindings?feishuUserId=ou_xxx
 ```
 
 ## 编号规则
@@ -146,25 +181,6 @@ GET /api/feishu-bindings?feishuUserId=ou_xxx
 - 时区：Asia/Shanghai
 - 日流水号：01-99（超出返回错误）
 
-## 审计日志
-
-所有关键操作均记录审计日志：
-
-```bash
-# 查看审计日志（Manager 可看全部，其他人只看自己）
-GET /api/audit-logs
-GET /api/audit-logs?entityType=purchase_request&entityId=1
-```
-
-## 错误处理
-
-| 状态码 | 说明 |
-|--------|------|
-| 400 | 请求参数错误 |
-| 403 | 无权限操作 |
-| 404 | 资源不存在 |
-| 500 | 服务器内部错误 |
-
 ## 敏感接口权限
 
 | 接口 | 权限要求 |
@@ -174,3 +190,12 @@ GET /api/audit-logs?entityType=purchase_request&entityId=1
 | `POST /api/materials` | Buyer/Manager |
 | `POST /api/suppliers` | Buyer/Manager |
 | `GET /api/purchase-orders/{id}` | Requester 只能看自己PR对应的PO |
+
+## 错误处理
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 请求参数错误 |
+| 403 | 无权限操作 |
+| 404 | 资源不存在 |
+| 500 | 服务器内部错误 |

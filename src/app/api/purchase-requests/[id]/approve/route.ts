@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // POST /api/purchase-requests/[id]/approve - 审批采购申请
 export async function POST(
@@ -12,7 +12,7 @@ export async function POST(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     const approved = body.approved !== false; // 默认批准
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // POST /api/purchase-requests/[id]/submit - 提交采购申请
 export async function POST(
@@ -10,7 +10,7 @@ export async function POST(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 检查当前状态
     const { data: existing } = await client
@@ -21,6 +21,11 @@ export async function POST(
 
     if (!existing) {
       return NextResponse.json({ error: 'Purchase request not found' }, { status: 404 });
+    }
+
+    // 只有申请人本人可提交自己的草稿
+    if (existing.applicant !== actor) {
+      return NextResponse.json({ error: '只有申请人本人可提交此采购申请' }, { status: 403 });
     }
 
     if (existing.status !== 'draft') {

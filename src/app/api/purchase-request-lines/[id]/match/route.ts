@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { matchFrameworkAgreement, updateMatchConfirm } from '@/storage/database/fa-matcher';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-request-lines/[id]/match - 查询 FA 匹配结果
 // Requester 可查看自己 PR 的匹配结果
@@ -12,7 +12,7 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const topN = parseInt(searchParams.get('topN') || '3', 10);
 
@@ -59,7 +59,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     const faId = body.faId;

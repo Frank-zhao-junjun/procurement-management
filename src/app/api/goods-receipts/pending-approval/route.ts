@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentity, canApprove, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canApprove, type Role } from '@/lib/role-filter';
 
 // GET /api/goods-receipts/pending-approval - 获取待审批的超收收货单
 // 仅 Manager 可访问
 export async function GET(request: NextRequest) {
   try {
-    const { role } = getUserIdentity(request) as { role: Role };
+    const { role } = await getUserIdentityWithLookup(request);
     
     // 仅 Manager 可查看待审批列表
     if (!canApprove(role)) {

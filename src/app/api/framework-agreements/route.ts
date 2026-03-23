@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, filterFrameworkAgreements, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, filterFrameworkAgreements, type Role } from '@/lib/role-filter';
 
 // GET /api/framework-agreements - 获取框架协议列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status') || 'active';
     const supplierId = searchParams.get('supplierId');
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 生成 FA 编号（使用上海时区 + 99上限）
     const faNumber = await numberGenerators.fa();

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, filterSourcingTasks, type Role } from '@/lib/role-filter';
+import { insertSourcingTaskSchema } from '@/storage/database/shared/schema';
+import { getUserIdentityWithLookup, filterSourcingTasks, type Role } from '@/lib/role-filter';
 
 // GET /api/sourcing-tasks - 获取寻源任务列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
     const prId = searchParams.get('prId');
@@ -49,43 +50,50 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/sourcing-tasks - 创建寻源任务
+// POST /api/sourcing-tasks - 创建寻源任务（仅 buyer/manager）
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 生成 SC 编号（使用上海时区 + 99上限）
+    if (role !== 'buyer' && role !== 'manager') {
+      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建寻源任务' }, { status: 403 });
+    }
+
+    const parsed = insertSourcingTaskSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
     const taskNumber = await numberGenerators.sc();
 
-    // 获取 PR 快照
     let prSnapshot = '';
-    if (body.prId) {
+    if (parsed.data.prId) {
       const { data: pr } = await client
         .from('purchase_requests')
         .select('pr_number')
-        .eq('id', body.prId)
+        .eq('id', parsed.data.prId)
         .single();
-      if (pr) {
-        prSnapshot = pr.pr_number;
-      }
+      if (pr) prSnapshot = pr.pr_number;
     }
 
-    // 插入数据
     const { data: task, error } = await client
       .from('sourcing_tasks')
       .insert({
         task_number: taskNumber,
-        pr_id: body.prId,
-        pr_line_id: body.prLineId,
-        material_id: body.materialId || null,
-        material_snapshot: body.materialSnapshot || body.requirementText || '',
-        requirement_text: body.requirementText || '',
-        target_supplier_id: body.targetSupplierId || null,
-        target_supplier_snapshot: body.targetSupplierSnapshot || '',
+        pr_id: parsed.data.prId,
+        pr_line_id: parsed.data.prLineId,
+        material_id: parsed.data.materialId ?? null,
+        material_snapshot: parsed.data.materialSnapshot ?? parsed.data.requirementText ?? '',
+        requirement_text: parsed.data.requirementText ?? '',
+        target_supplier_id: parsed.data.targetSupplierId ?? null,
+        target_supplier_snapshot: parsed.data.targetSupplierSnapshot ?? '',
         status: 'pending',
-        due_date: body.dueDate || null,
+        due_date: parsed.data.dueDate ?? null,
         created_by: actor,
       })
       .select()
@@ -95,8 +103,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 更新 PR 行状态
-    if (body.prLineId) {
+    if (parsed.data.prLineId) {
       await client
         .from('purchase_request_lines')
         .update({
@@ -104,17 +111,16 @@ export async function POST(request: NextRequest) {
           sourcing_task_id: task.id,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', body.prLineId);
+        .eq('id', parsed.data.prLineId);
     }
 
-    // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'sourcing_task',
       entity_id: task.id,
       action: 'create',
       actor,
       actor_role: role,
-      detail: { task_number: taskNumber, pr_id: body.prId },
+      detail: { task_number: taskNumber, pr_id: parsed.data.prId },
     });
 
     return NextResponse.json({ data: task }, { status: 201 });

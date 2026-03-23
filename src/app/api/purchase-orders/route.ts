@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentity, filterPurchaseOrders, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, filterPurchaseOrders, getRequesterAccessiblePOIds, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders - 获取采购订单列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
     const supplierId = searchParams.get('supplierId');
@@ -29,8 +29,13 @@ export async function GET(request: NextRequest) {
       query = query.eq('supplier_id', parseInt(supplierId, 10));
     }
 
-    // 按角色过滤
-    query = filterPurchaseOrders(query, role as Role, actor);
+    // 按角色过滤：requester 仅能看自己 PR 对应的 PO
+    if (role === 'requester') {
+      const allowedIds = await getRequesterAccessiblePOIds(client, actor);
+      query = allowedIds.length > 0 ? query.in('id', allowedIds) : query.eq('id', -1);
+    } else {
+      query = filterPurchaseOrders(query, role as Role, actor);
+    }
 
     const { data, error, count } = await query;
 
@@ -53,7 +58,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request);
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
     // 生成 PO 编号（使用上海时区 + 99上限）
@@ -124,7 +129,7 @@ export async function POST(request: NextRequest) {
             .update({
               progress: 'ordered',
               purchase_order_id: po.id,
-              po_line_number: line.prLineId ? (body.lines.indexOf(line) + 1) : null,
+              po_line_number: body.lines.indexOf(line) + 1,
               updated_at: new Date().toISOString(),
             })
             .eq('id', line.prLineId);

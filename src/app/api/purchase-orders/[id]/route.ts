@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders/[id] - 获取单个采购订单
 // 按角色过滤：requester 只能看自己 PR 对应的 PO
@@ -11,7 +11,7 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 获取 PO 信息
     const { data: po, error } = await client

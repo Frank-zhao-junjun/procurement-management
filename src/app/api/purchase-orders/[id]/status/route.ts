@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentity, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // PUT /api/purchase-orders/[id]/status - 更新采购订单状态
 export async function PUT(
@@ -11,7 +11,7 @@ export async function PUT(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = getUserIdentity(request) as { actor: string; role: Role };
+    const { actor, role } = await getUserIdentityWithLookup(request);
 
     const newStatus = body.status;
     const validStatuses = ['draft', 'sent', 'partial', 'received', 'cancelled'];
