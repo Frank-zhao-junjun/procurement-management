@@ -127,27 +127,138 @@ curl -X POST http://localhost:5000/api/purchase-requests \
 
 ## 完整业务流程
 
-### 1. 采购申请 (PR)
+### 0. 物料匹配检查（推荐第一步）
+
+**重要**：在创建采购申请前，建议先检查物料匹配情况，避免后续流程中断。
 
 ```bash
-# 创建 PR
-POST /api/purchase-requests
+# 单个物料匹配检查
+GET /api/materials/match?text=无线鼠标
+
+# 返回示例
 {
-  "reason": "产线急需M3螺栓500个",
+  "found": true,
+  "exactMatch": {"id": 5, "code": "MAT001", "name": "无线鼠标", "unit": "个"},
+  "suggestions": [],
+  "action": "use_existing",  // use_existing | create_new | confirm
+  "message": "找到精确匹配的物料: 无线鼠标"
+}
+```
+
+**返回的 action 说明**：
+- `use_existing`: 找到精确匹配，可直接使用现有物料
+- `create_new`: 未找到匹配，建议创建新物料
+- `confirm`: 找到相似物料，需要用户确认
+
+**批量检查 PR 物料**：
+
+```bash
+POST /api/purchase-requests/check-materials
+{
   "lines": [
-    {"requirementText": "M3螺栓", "quantity": 500, "expectedDeliveryDate": "2025-04-15"}
+    {"requirementText": "无线鼠标", "quantity": 10},
+    {"requirementText": "蓝牙键盘", "quantity": 5}
   ]
 }
 
-# 提交 PR
-POST /api/purchase-requests/{id}/submit
-
-# Manager 审批
-POST /api/purchase-requests/{id}/approve
-{"approved": true}
+# 返回示例
+{
+  "canProceed": false,  // true 表示可以直接创建 PR
+  "summary": {
+    "total": 2,
+    "exactMatches": 1,
+    "needConfirm": 0,
+    "notFound": 1
+  },
+  "nextAction": "confirm_materials",  // create_pr | confirm_materials | all_cancelled
+  "lines": [
+    {
+      "requirementText": "无线鼠标",
+      "found": true,
+      "exactMatch": {"id": 5, "name": "无线鼠标"},
+      "action": "use_existing"
+    },
+    {
+      "requirementText": "蓝牙键盘",
+      "found": false,
+      "exactMatch": null,
+      "suggestions": [],
+      "action": "create_new"
+    }
+  ]
+}
 ```
 
-### 2. 框架协议匹配
+### 1. 创建采购申请（带物料确认）
+
+**场景 A：所有物料都有精确匹配** → 直接创建 PR
+
+```bash
+POST /api/purchase-requests
+{
+  "reason": "办公设备采购",
+  "lines": [
+    {"requirementText": "无线鼠标", "quantity": 10}
+  ]
+}
+```
+
+**场景 B：部分物料需要确认** → 使用确认接口
+
+```bash
+# 用户确认后创建 PR（可选择使用现有物料或创建新物料）
+POST /api/purchase-requests/confirm-materials
+{
+  "reason": "办公设备采购",
+  "lines": [
+    {
+      "requirementText": "无线鼠标",
+      "quantity": 10,
+      "confirmedMaterialId": 5  // 使用现有物料
+    },
+    {
+      "requirementText": "蓝牙键盘",
+      "quantity": 5,
+      "confirmedMaterialName": "蓝牙键盘",  // 创建新物料
+      "confirmedMaterialUnit": "个"
+    }
+  ],
+  "cancelledLines": []  // 用户取消的行索引
+}
+
+# 返回示例
+{
+  "created": true,
+  "data": {
+    "id": 8,
+    "pr_number": "PR-20260323-03",
+    "status": "draft",
+    "lines_count": 2,
+    "new_materials": [{"id": 9, "name": "蓝牙键盘", "unit": "个"}]
+  }
+}
+```
+
+**场景 C：用户取消所有行** → 不创建 PR
+
+```bash
+POST /api/purchase-requests/confirm-materials
+{
+  "reason": "测试取消",
+  "lines": [...],
+  "cancelledLines": [0, 1, 2]  // 取消所有行
+}
+
+# 返回
+{
+  "created": false,
+  "message": "所有采购行已被取消，采购申请未创建"
+}
+```
+
+### 2. 提交与审批 PR
+
+### 3. 框架协议匹配
 
 审批通过后，系统自动匹配框架协议：
 - 状态设为 `pending_confirm`（待确认，非静默）
@@ -166,7 +277,7 @@ PUT /api/purchase-request-lines/{id}/confirm-fa
 {"confirmed": false}
 ```
 
-### 3. 寻源与报价
+### 4. 寻源与报价
 
 ```bash
 # 创建报价单
@@ -183,7 +294,7 @@ PUT /api/quotes/{id}
 {"awarded": "winner"}
 ```
 
-### 4. 采购订单 (PO)
+### 5. 采购订单 (PO)
 
 ```bash
 # 创建 PO
@@ -202,7 +313,7 @@ POST /api/purchase-orders/{id}/send
 POST /api/purchase-orders/{id}/retry
 ```
 
-### 5. 收货与超收
+### 6. 收货与超收
 
 ```bash
 # 收货
@@ -222,7 +333,7 @@ POST /api/goods-receipts
 {"poLineId": 1, "quantity": 10, "grType": "out"}
 ```
 
-### 6. 查询 Agent 绑定
+### 7. 查询 Agent 绑定
 
 ```bash
 # 查询绑定状态
