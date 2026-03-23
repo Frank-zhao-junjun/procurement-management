@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   registerAgent,
-  createOrUpdateAgent,
   getByAgentId,
-  getByFeishuUserId,
   getByRole,
   getAllActive,
   type Role,
@@ -14,16 +12,10 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const agentId = searchParams.get('agentId');
-    const feishuUserId = searchParams.get('feishuUserId');
     const role = searchParams.get('role') as Role | null;
 
     if (agentId) {
       const binding = await getByAgentId(agentId);
-      return NextResponse.json({ data: binding });
-    }
-
-    if (feishuUserId) {
-      const binding = await getByFeishuUserId(feishuUserId);
       return NextResponse.json({ data: binding });
     }
 
@@ -40,12 +32,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/agent-bindings - 注册 Agent 或创建绑定
-// Body: { agentId, role, webhookUrl?, feishuUserId?, feishuOpenId?, feishuUnionId?, feishuAppId? }
+// POST /api/agent-bindings - 注册 Agent
+// Body: { agentId, role, webhookUrl? }
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { agentId, role, webhookUrl, feishuUserId, feishuOpenId, feishuUnionId, feishuAppId } = body;
+    const { agentId, role, webhookUrl } = body;
 
     if (!agentId || !role) {
       return NextResponse.json(
@@ -69,14 +61,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = feishuUserId
-      ? await createOrUpdateAgent(agentId, role, {
-          feishuUserId,
-          feishuOpenId,
-          feishuUnionId,
-          feishuAppId,
-        })
-      : await registerAgent(agentId, role as Role, webhookUrl);
+    const result = await registerAgent(agentId, role as Role, webhookUrl);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 });
