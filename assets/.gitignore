@@ -1,3 +1,5 @@
+.next
+
 # Dependencies
 node_modules/
 .pnp
@@ -9,11 +11,6 @@ build/
 out/
 .next/
 .rsbuild/
-
-# Documentation and review files (keep in separate docs repo)
-assets/
-docs/
-_review_extract/
 
 # Testing
 coverage/
