@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { z } from 'zod';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, filterPurchaseRequests, type Role } from '@/lib/role-filter';
 
@@ -18,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('purchase_requests')
-      .select('*, purchase_request_lines(*)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
@@ -61,6 +60,9 @@ export async function POST(request: NextRequest) {
     // 生成 PR 编号（使用上海时区 + 99上限）
     const prNumber = await numberGenerators.pr();
 
+    // 构建行项目快照
+    const linesSnapshot = body.lines ? JSON.stringify(body.lines) : null;
+
     // 插入主表
     const { data: pr, error: prError } = await client
       .from('purchase_requests')
@@ -70,6 +72,7 @@ export async function POST(request: NextRequest) {
         applicant_role: role,
         reason: body.reason,
         status: 'draft',
+        lines_snapshot: linesSnapshot,
       })
       .select()
       .single();
@@ -104,13 +107,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 获取完整数据
-    const { data: fullPR } = await client
-      .from('purchase_requests')
-      .select('*, purchase_request_lines(*)')
-      .eq('id', pr.id)
-      .single();
-
     // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'purchase_request',
@@ -121,7 +117,7 @@ export async function POST(request: NextRequest) {
       detail: { pr_number: prNumber, lines_count: body.lines?.length || 0 },
     });
 
-    return NextResponse.json({ data: fullPR }, { status: 201 });
+    return NextResponse.json({ data: pr }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

@@ -75,14 +75,19 @@ export async function POST(
       },
     });
 
-    // 获取完整数据
+    // 获取完整数据（分开查询避免嵌套）
     const { data: fullPR } = await client
       .from('purchase_requests')
-      .select('*, purchase_request_lines(*)')
+      .select('*')
       .eq('id', parseInt(id, 10))
       .single();
 
-    return NextResponse.json({ data: fullPR });
+    const { data: lines } = await client
+      .from('purchase_request_lines')
+      .select('*')
+      .eq('request_id', parseInt(id, 10));
+
+    return NextResponse.json({ data: { ...fullPR, purchase_request_lines: lines } });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

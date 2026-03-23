@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup } from '@/lib/role-filter';
 
 // GET /api/purchase-requests/[id] - 获取单个采购申请
 export async function GET(
@@ -14,7 +14,7 @@ export async function GET(
 
     const { data, error } = await client
       .from('purchase_requests')
-      .select('*, purchase_request_lines(*)')
+      .select('*')
       .eq('id', parseInt(id, 10))
       .single();
 
@@ -30,7 +30,13 @@ export async function GET(
       return NextResponse.json({ error: '无权访问此采购申请' }, { status: 403 });
     }
 
-    return NextResponse.json({ data });
+    // 获取行项目
+    const { data: lines } = await client
+      .from('purchase_request_lines')
+      .select('*')
+      .eq('request_id', parseInt(id, 10));
+
+    return NextResponse.json({ data: { ...data, purchase_request_lines: lines } });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -66,8 +72,12 @@ export async function PUT(
       );
     }
 
+    // 构建行项目快照
+    const linesSnapshot = body.lines ? JSON.stringify(body.lines) : null;
+
     const updateData: any = {
       reason: body.reason,
+      lines_snapshot: linesSnapshot,
       updated_at: new Date().toISOString(),
     };
 
@@ -107,12 +117,11 @@ export async function PUT(
       await client.from('purchase_request_lines').insert(lines);
     }
 
-    // 获取完整数据
-    const { data: fullPR } = await client
-      .from('purchase_requests')
-      .select('*, purchase_request_lines(*)')
-      .eq('id', parseInt(id, 10))
-      .single();
+    // 获取行项目
+    const { data: lines } = await client
+      .from('purchase_request_lines')
+      .select('*')
+      .eq('request_id', parseInt(id, 10));
 
     // 记录审计日志
     await client.from('audit_logs').insert({
@@ -124,7 +133,7 @@ export async function PUT(
       detail: body,
     });
 
-    return NextResponse.json({ data: fullPR });
+    return NextResponse.json({ data: { ...data, purchase_request_lines: lines } });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

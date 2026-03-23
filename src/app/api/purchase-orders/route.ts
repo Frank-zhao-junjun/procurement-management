@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('purchase_orders')
-      .select('*, purchase_order_lines(*)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
@@ -75,6 +75,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 构建行项目快照
+    const linesSnapshot = body.lines ? JSON.stringify(body.lines) : null;
+
     // 插入主表
     const { data: po, error: poError } = await client
       .from('purchase_orders')
@@ -84,6 +87,8 @@ export async function POST(request: NextRequest) {
         supplier_snapshot: body.supplierSnapshot || '',
         delivery_date: deliveryDate || null,
         status: 'draft',
+        created_by: actor,
+        lines_snapshot: linesSnapshot,
       })
       .select()
       .single();
@@ -100,7 +105,7 @@ export async function POST(request: NextRequest) {
         pr_id: line.prId,
         pr_line_id: line.prLineId,
         material_id: line.materialId || null,
-        material_snapshot: line.materialSnapshot || '',
+        material_snapshot: line.materialSnapshot || line.materialName || '',
         quantity: line.quantity,
         unit_price: line.unitPrice || 0,
         total_price: (line.quantity || 0) * (line.unitPrice || 0),
@@ -137,13 +142,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 获取完整数据
-    const { data: fullPO } = await client
-      .from('purchase_orders')
-      .select('*, purchase_order_lines(*)')
-      .eq('id', po.id)
-      .single();
-
     // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'purchase_order',
@@ -154,7 +152,7 @@ export async function POST(request: NextRequest) {
       detail: { po_number: poNumber, lines_count: body.lines?.length || 0 },
     });
 
-    return NextResponse.json({ data: fullPO }, { status: 201 });
+    return NextResponse.json({ data: po }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
