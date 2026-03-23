@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { goodsReceiptsApi, purchaseOrdersApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Search } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 const typeMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
   in: { label: '收货', variant: 'default' },
@@ -33,26 +34,29 @@ export default function GoodsReceiptsPage() {
     notes: '',
   });
 
-  useEffect(() => {
-    async function fetchReceipts() {
-      try {
-        setLoading(true);
-        const data = await goodsReceiptsApi.list({
-          grType: typeFilter || undefined,
-          page,
-          pageSize,
-        });
-        setReceipts(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch receipts:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchReceipts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await goodsReceiptsApi.list({
+        grType: typeFilter || undefined,
+        page,
+        pageSize,
+      });
+      setReceipts(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch receipts:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [typeFilter, page, pageSize]);
 
+  useEffect(() => {
     fetchReceipts();
-  }, [typeFilter, page]);
+  }, [fetchReceipts]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchReceipts);
 
   useEffect(() => {
     async function fetchOrders() {
@@ -73,13 +77,13 @@ export default function GoodsReceiptsPage() {
 
   const handleCreateReceipt = async () => {
     try {
-      const result = await goodsReceiptsApi.create({
+      await goodsReceiptsApi.create({
         poId: selectedOrder?.id,
         poLineId: parseInt(newReceipt.poLineId),
         quantity: parseFloat(newReceipt.quantity),
         receiptDate: newReceipt.receiptDate,
         notes: newReceipt.notes || null,
-      }, 'agent:requester');
+      });
       
       setShowNewForm(false);
       setNewReceipt({
@@ -90,14 +94,7 @@ export default function GoodsReceiptsPage() {
       });
       setSelectedOrder(null);
       
-      // 刷新列表
-      const data = await goodsReceiptsApi.list({
-        grType: typeFilter || undefined,
-        page,
-        pageSize,
-      });
-      setReceipts(data.data || []);
-      setTotal(data.total || 0);
+      fetchReceipts();
     } catch (error: any) {
       alert(error.message || '创建失败');
     }

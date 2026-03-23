@@ -1,8 +1,10 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { getIdentity, ROLE_LABELS, type Role, type Identity } from '@/lib/identity-store';
 
 const menuItems = [
   {
@@ -59,6 +61,16 @@ const menuItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [identity, setIdentity] = useState<Identity>({ actor: 'web:requester', role: 'requester' });
+
+  useEffect(() => {
+    setIdentity(getIdentity());
+    const handleChange = (e: Event) => {
+      setIdentity((e as CustomEvent<Identity>).detail);
+    };
+    window.addEventListener('identity-changed', handleChange);
+    return () => window.removeEventListener('identity-changed', handleChange);
+  }, []);
 
   return (
     <aside className="w-64 bg-slate-900 text-white flex flex-col">
@@ -85,8 +97,8 @@ export function Sidebar() {
       </nav>
       <div className="p-4 border-t border-slate-700">
         <div className="text-xs text-slate-400">
-          <p>状态：已连接</p>
-          <p className="mt-1">角色：需求人</p>
+          <p>Actor: {identity.actor}</p>
+          <p className="mt-1">角色：{ROLE_LABELS[identity.role as Role]}</p>
         </div>
       </div>
     </aside>

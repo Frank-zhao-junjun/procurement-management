@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { purchaseRequestsApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus } from 'lucide-react';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: '草稿', variant: 'secondary' },
@@ -36,35 +37,36 @@ export default function PurchaseRequestsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 20;
 
-  useEffect(() => {
-    async function fetchRequests() {
-      try {
-        setLoading(true);
-        const data = await purchaseRequestsApi.list({
-          status: statusFilter || undefined,
-          page,
-          pageSize,
-        });
-        setRequests(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch requests:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchRequests = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await purchaseRequestsApi.list({
+        status: statusFilter || undefined,
+        page,
+        pageSize,
+      });
+      setRequests(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch requests:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [statusFilter, page, pageSize]);
 
+  useEffect(() => {
     fetchRequests();
-  }, [statusFilter, page]);
+  }, [fetchRequests]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchRequests);
 
   const totalPages = Math.ceil(total / pageSize);
 
   const handleSubmit = async (id: number) => {
     try {
-      await purchaseRequestsApi.submit(id, 'agent:user');
-      setRequests((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: 'submitted' } : r))
-      );
+      await purchaseRequestsApi.submit(id);
+      fetchRequests();
     } catch (error) {
       alert('提交失败');
     }
@@ -72,10 +74,8 @@ export default function PurchaseRequestsPage() {
 
   const handleApprove = async (id: number, approved: boolean) => {
     try {
-      const result = await purchaseRequestsApi.approve(id, approved, undefined, 'agent:manager', 'manager');
-      setRequests((prev) =>
-        prev.map((r) => (r.id === id ? result.data : r))
-      );
+      await purchaseRequestsApi.approve(id, approved);
+      fetchRequests();
     } catch (error) {
       alert(approved ? '审批失败' : '拒绝失败');
     }

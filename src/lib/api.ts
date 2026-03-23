@@ -1,208 +1,175 @@
-// 采购管理系统 API 客户端
+/**
+ * API 客户端
+ * 每次请求自动附带 X-Actor 和 X-Role 请求头
+ */
+
+import { getIdentityHeaders } from './identity-store';
 
 const API_BASE = '/api';
 
-interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: any;
-  headers?: Record<string, string>;
+interface RequestOptions extends RequestInit {
+  params?: Record<string, string | number | undefined>;
+}
+
+function buildUrl(endpoint: string, params?: Record<string, string | number | undefined>): string {
+  const url = new URL(endpoint, window.location.origin + API_BASE);
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        url.searchParams.append(key, String(value));
+      }
+    });
+  }
+  return url.toString();
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, headers = {} } = options;
-  
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
+  const { params, ...fetchOptions } = options;
+  const url = buildUrl(endpoint, params);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getIdentityHeaders(),
+    ...(fetchOptions.headers as Record<string, string> || {}),
+  };
+
+  const response = await fetch(url, {
+    ...fetchOptions,
+    headers,
   });
 
-  const data = await response.json();
-  
   if (!response.ok) {
-    throw new Error(data.error || 'Request failed');
+    const error = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(error.error || `HTTP ${response.status}`);
   }
 
-  return data;
+  return response.json();
 }
 
-// 物料 API
-export const materialsApi = {
-  list: (params?: { search?: string; isActive?: boolean; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.search) searchParams.set('search', params.search);
-    if (params?.isActive !== undefined) searchParams.set('isActive', String(params.isActive));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/materials?${searchParams.toString()}`);
-  },
-  get: (id: number) => request<any>(`/materials/${id}`),
-  create: (data: any) => request<any>('/materials', { method: 'POST', body: data }),
-  update: (id: number, data: any) => request<any>(`/materials/${id}`, { method: 'PUT', body: data }),
-  delete: (id: number) => request<any>(`/materials/${id}`, { method: 'DELETE' }),
-};
+// 基础 API 方法
+export const api = {
+  get: <T>(endpoint: string, params?: Record<string, string | number | undefined>) =>
+    request<T>(endpoint, { method: 'GET', params }),
 
-// 供应商 API
-export const suppliersApi = {
-  list: (params?: { search?: string; isActive?: boolean; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.search) searchParams.set('search', params.search);
-    if (params?.isActive !== undefined) searchParams.set('isActive', String(params.isActive));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/suppliers?${searchParams.toString()}`);
-  },
-  get: (id: number) => request<any>(`/suppliers/${id}`),
-  create: (data: any) => request<any>('/suppliers', { method: 'POST', body: data }),
-  update: (id: number, data: any) => request<any>(`/suppliers/${id}`, { method: 'PUT', body: data }),
-  delete: (id: number) => request<any>(`/suppliers/${id}`, { method: 'DELETE' }),
+  post: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+
+  put: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+
+  delete: <T>(endpoint: string) =>
+    request<T>(endpoint, { method: 'DELETE' }),
 };
 
 // 采购申请 API
 export const purchaseRequestsApi = {
-  list: (params?: { status?: string; applicant?: string; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.applicant) searchParams.set('applicant', params.applicant);
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/purchase-requests?${searchParams.toString()}`);
-  },
-  get: (id: number) => request<any>(`/purchase-requests/${id}`),
-  create: (data: any, actor?: string) => request<any>('/purchase-requests', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor } : {},
-  }),
-  update: (id: number, data: any, actor?: string) => request<any>(`/purchase-requests/${id}`, {
-    method: 'PUT',
-    body: data,
-    headers: actor ? { 'X-Actor': actor } : {},
-  }),
-  delete: (id: number, actor?: string) => request<any>(`/purchase-requests/${id}`, {
-    method: 'DELETE',
-    headers: actor ? { 'X-Actor': actor } : {},
-  }),
-  submit: (id: number, actor?: string) => request<any>(`/purchase-requests/${id}/submit`, {
-    method: 'POST',
-    headers: actor ? { 'X-Actor': actor } : {},
-  }),
-  approve: (id: number, approved: boolean, note?: string, actor?: string, role?: string) => request<any>(`/purchase-requests/${id}/approve`, {
-    method: 'POST',
-    body: { approved, note },
-    headers: {
-      ...(actor ? { 'X-Actor': actor } : {}),
-      ...(role ? { 'X-Role': role } : {}),
-    },
-  }),
+  list: (params?: { status?: string; page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/purchase-requests', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/purchase-requests/${id}`),
+
+  create: (data: { reason: string; lines: any[] }) =>
+    api.post<{ data: any }>('/purchase-requests', data),
+
+  submit: (id: number) =>
+    api.post<{ data: any }>(`/purchase-requests/${id}/submit`),
+
+  approve: (id: number, approved: boolean) =>
+    api.post<{ data: any }>(`/purchase-requests/${id}/approve`, { approved }),
 };
 
 // 采购订单 API
 export const purchaseOrdersApi = {
-  list: (params?: { status?: string; supplierId?: number; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.supplierId) searchParams.set('supplierId', String(params.supplierId));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/purchase-orders?${searchParams.toString()}`);
-  },
-  get: (id: number) => request<any>(`/purchase-orders/${id}`),
-  create: (data: any, actor?: string) => request<any>('/purchase-orders', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'buyer' } : { 'X-Role': 'buyer' },
-  }),
-  updateStatus: (id: number, status: string, actor?: string) => request<any>(`/purchase-orders/${id}/status`, {
-    method: 'PUT',
-    body: { status },
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'buyer' } : { 'X-Role': 'buyer' },
-  }),
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/purchase-orders', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/purchase-orders/${id}`),
+
+  create: (data: any) =>
+    api.post<{ data: any }>('/purchase-orders', data),
+
+  send: (id: number) =>
+    api.post<{ data: any }>(`/purchase-orders/${id}/send`),
 };
 
-// 收货单 API
-export const goodsReceiptsApi = {
-  list: (params?: { grType?: string; poId?: number; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.grType) searchParams.set('grType', params.grType);
-    if (params?.poId) searchParams.set('poId', String(params.poId));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/goods-receipts?${searchParams.toString()}`);
-  },
-  create: (data: any, actor?: string) => request<any>('/goods-receipts', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'requester' } : { 'X-Role': 'requester' },
-  }),
+// 供应商 API
+export const suppliersApi = {
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/suppliers', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/suppliers/${id}`),
+
+  create: (data: any) =>
+    api.post<{ data: any }>('/suppliers', data),
+};
+
+// 物料 API
+export const materialsApi = {
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/materials', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/materials/${id}`),
+
+  create: (data: any) =>
+    api.post<{ data: any }>('/materials', data),
 };
 
 // 框架协议 API
 export const frameworkAgreementsApi = {
-  list: (params?: { status?: string; supplierId?: number; materialId?: number; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.supplierId) searchParams.set('supplierId', String(params.supplierId));
-    if (params?.materialId) searchParams.set('materialId', String(params.materialId));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/framework-agreements?${searchParams.toString()}`);
-  },
-  create: (data: any, actor?: string) => request<any>('/framework-agreements', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'buyer' } : { 'X-Role': 'buyer' },
-  }),
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/framework-agreements', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/framework-agreements/${id}`),
 };
 
 // 寻源任务 API
 export const sourcingTasksApi = {
-  list: (params?: { status?: string; prId?: number; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.prId) searchParams.set('prId', String(params.prId));
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/sourcing-tasks?${searchParams.toString()}`);
-  },
-  create: (data: any, actor?: string) => request<any>('/sourcing-tasks', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'buyer' } : { 'X-Role': 'buyer' },
-  }),
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/sourcing-tasks', params),
 };
 
 // 报价单 API
 export const quotesApi = {
-  list: (params?: { sourcingTaskId?: number; supplierId?: number; status?: string; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.sourcingTaskId) searchParams.set('sourcingTaskId', String(params.sourcingTaskId));
-    if (params?.supplierId) searchParams.set('supplierId', String(params.supplierId));
-    if (params?.status) searchParams.set('status', params.status);
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/quotes?${searchParams.toString()}`);
-  },
-  create: (data: any, actor?: string) => request<any>('/quotes', {
-    method: 'POST',
-    body: data,
-    headers: actor ? { 'X-Actor': actor, 'X-Role': 'buyer' } : { 'X-Role': 'buyer' },
-  }),
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/quotes', params),
+};
+
+// 收货单 API
+export const goodsReceiptsApi = {
+  list: (params?: { page?: number; pageSize?: number; grType?: string }) =>
+    api.get<{ data: any[]; total: number }>('/goods-receipts', params),
+
+  create: (data: any) =>
+    api.post<{ data: any }>('/goods-receipts', data),
+
+  approveOverdelivery: (id: number, approved: boolean) =>
+    api.post<{ data: any }>(`/goods-receipts/${id}/approve-overdelivery`, { approved }),
 };
 
 // 审计日志 API
 export const auditLogsApi = {
-  list: (params?: { entityType?: string; entityId?: number; actor?: string; action?: string; page?: number; pageSize?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.entityType) searchParams.set('entityType', params.entityType);
-    if (params?.entityId) searchParams.set('entityId', String(params.entityId));
-    if (params?.actor) searchParams.set('actor', params.actor);
-    if (params?.action) searchParams.set('action', params.action);
-    if (params?.page) searchParams.set('page', String(params.page));
-    if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-    return request<any>(`/audit-logs?${searchParams.toString()}`);
-  },
+  list: (params?: { page?: number; pageSize?: number }) =>
+    api.get<{ data: any[]; total: number }>('/audit-logs', params),
 };
+
+// Agent 绑定 API
+export const agentBindingsApi = {
+  list: () =>
+    api.get<{ data: any[] }>('/agent-bindings'),
+
+  create: (data: { agentId: string; role: string; webhookUrl?: string }) =>
+    api.post<{ success: boolean; bindingId: number }>('/agent-bindings', data),
+};
+
+export type { RequestOptions };

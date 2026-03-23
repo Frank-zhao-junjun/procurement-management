@@ -1,7 +1,7 @@
 'use client';
 
 import { Bell, Settings, Info } from 'lucide-react';
-import { IdentitySelector } from './identity-selector';
+import { IdentitySelector } from '@/components/identity-selector';
 
 export function Header() {
   return (

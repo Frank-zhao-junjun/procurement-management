@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { materialsApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 export default function MaterialsPage() {
   const [materials, setMaterials] = useState<any[]>([]);
@@ -17,26 +18,28 @@ export default function MaterialsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 20;
 
-  useEffect(() => {
-    async function fetchMaterials() {
-      try {
-        setLoading(true);
-        const data = await materialsApi.list({
-          search: search || undefined,
-          page,
-          pageSize,
-        });
-        setMaterials(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch materials:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchMaterials = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await materialsApi.list({
+        page,
+        pageSize,
+      });
+      setMaterials(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch materials:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [page, pageSize]);
 
+  useEffect(() => {
     fetchMaterials();
-  }, [search, page]);
+  }, [fetchMaterials]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchMaterials);
 
   const totalPages = Math.ceil(total / pageSize);
 

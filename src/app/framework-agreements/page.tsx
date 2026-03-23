@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { frameworkAgreementsApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus } from 'lucide-react';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   active: { label: '生效中', variant: 'default' },
@@ -21,22 +22,25 @@ export default function FrameworkAgreementsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 20;
 
-  useEffect(() => {
-    async function fetchAgreements() {
-      try {
-        setLoading(true);
-        const data = await frameworkAgreementsApi.list({ page, pageSize });
-        setAgreements(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch agreements:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchAgreements = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await frameworkAgreementsApi.list({ page, pageSize });
+      setAgreements(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch agreements:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [page, pageSize]);
 
+  useEffect(() => {
     fetchAgreements();
-  }, [page]);
+  }, [fetchAgreements]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchAgreements);
 
   const totalPages = Math.ceil(total / pageSize);
 

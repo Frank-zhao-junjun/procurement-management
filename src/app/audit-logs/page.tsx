@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { auditLogsApi } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 const actionMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   create: { label: '创建', variant: 'default' },
@@ -37,22 +39,25 @@ export default function AuditLogsPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 50;
 
-  useEffect(() => {
-    async function fetchLogs() {
-      try {
-        setLoading(true);
-        const data = await auditLogsApi.list({ page, pageSize });
-        setLogs(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch logs:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchLogs = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await auditLogsApi.list({ page, pageSize });
+      setLogs(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch logs:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [page, pageSize]);
 
+  useEffect(() => {
     fetchLogs();
-  }, [page]);
+  }, [fetchLogs]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchLogs);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -119,20 +124,22 @@ export default function AuditLogsPage() {
                     共 {total} 条记录，第 {page}/{totalPages} 页
                   </p>
                   <div className="flex gap-2">
-                    <button
-                      className="px-3 py-1 border rounded disabled:opacity-50"
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                       disabled={page === 1}
                     >
                       上一页
-                    </button>
-                    <button
-                      className="px-3 py-1 border rounded disabled:opacity-50"
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                       disabled={page === totalPages}
                     >
                       下一页
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}

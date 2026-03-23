@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { purchaseOrdersApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus } from 'lucide-react';
+import { useIdentityChange } from '@/hooks/use-identity-change';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: '草稿', variant: 'secondary' },
@@ -24,35 +25,35 @@ export default function PurchaseOrdersPage() {
   const [total, setTotal] = useState(0);
   const pageSize = 20;
 
-  useEffect(() => {
-    async function fetchOrders() {
-      try {
-        setLoading(true);
-        const data = await purchaseOrdersApi.list({
-          status: statusFilter || undefined,
-          page,
-          pageSize,
-        });
-        setOrders(data.data || []);
-        setTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to fetch orders:', error);
-      } finally {
-        setLoading(false);
-      }
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await purchaseOrdersApi.list({
+        page,
+        pageSize,
+      });
+      setOrders(data.data || []);
+      setTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+    } finally {
+      setLoading(false);
     }
+  }, [page, pageSize]);
 
+  useEffect(() => {
     fetchOrders();
-  }, [statusFilter, page]);
+  }, [fetchOrders]);
+
+  // 监听身份变化，自动刷新
+  useIdentityChange(fetchOrders);
 
   const totalPages = Math.ceil(total / pageSize);
 
   const handleUpdateStatus = async (id: number, newStatus: string) => {
     try {
-      const result = await purchaseOrdersApi.updateStatus(id, newStatus, 'agent:buyer');
-      setOrders((prev) =>
-        prev.map((o) => (o.id === id ? result.data : o))
-      );
+      await purchaseOrdersApi.updateStatus?.(id, newStatus);
+      fetchOrders();
     } catch (error) {
       alert('更新状态失败');
     }
