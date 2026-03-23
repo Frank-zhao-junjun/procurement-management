@@ -5,12 +5,12 @@
 ## Agent-first 模型
 
 ```
-一个飞书账号 ↔ 一个 Agent ↔ 一个角色
+一个 Agent ↔ 一个角色
 ```
 
 - **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
-- **飞书可选**：飞书用户可绑定到已有 Agent；也可直接使用 Agent
-- **一对一**：一个飞书账号只能绑定一个 Agent
+- **角色固定**：`requester` / `buyer` / `manager`
+- **Webhook 可选**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
 
 ## 快速开始
 
@@ -25,20 +25,12 @@ Content-Type: application/json
   "role": "buyer"
 }
 
-# 注册并配置 Webhook（用于接收 PR 提交通知）
+# 注册 Manager Agent（配置 Webhook 接收待审批通知）
 POST /api/agent-bindings
 {
   "agentId": "my-manager-agent",
   "role": "manager",
   "webhookUrl": "https://your-server.com/webhook"
-}
-
-# 注册并绑定飞书
-POST /api/agent-bindings
-{
-  "agentId": "my-procurement-agent",
-  "role": "buyer",
-  "feishuUserId": "ou_xxx"
 }
 ```
 
@@ -230,12 +222,14 @@ POST /api/goods-receipts
 {"poLineId": 1, "quantity": 10, "grType": "out"}
 ```
 
-### 6. 飞书绑定
+### 6. 查询 Agent 绑定
 
 ```bash
 # 查询绑定状态
 GET /api/agent-bindings?agentId=my-agent
-GET /api/agent-bindings?feishuUserId=ou_xxx
+
+# 按角色查询
+GET /api/agent-bindings?role=manager
 ```
 
 ## 编号规则
