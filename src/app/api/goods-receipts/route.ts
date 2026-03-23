@@ -60,7 +60,17 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 获取 PO 行信息
+    // 校验必填参数
+    if (!body.poLineId) {
+      return NextResponse.json({ error: 'poLineId 为必填参数' }, { status: 400 });
+    }
+
+    const grQuantity = parseFloat(body.quantity);
+    if (isNaN(grQuantity) || grQuantity <= 0) {
+      return NextResponse.json({ error: 'quantity 必须为正数' }, { status: 400 });
+    }
+
+    // 获取 PO 行信息 - 严格校验
     const { data: poLine, error: poLineError } = await client
       .from('purchase_order_lines')
       .select('*')
@@ -68,7 +78,18 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (poLineError) {
-      return NextResponse.json({ error: 'PO line not found' }, { status: 404 });
+      console.error('Error fetching PO line:', poLineError);
+      return NextResponse.json({ error: '采购订单行查询失败', detail: poLineError.message }, { status: 500 });
+    }
+
+    if (!poLine) {
+      return NextResponse.json({ error: `采购订单行不存在 (ID: ${body.poLineId})` }, { status: 404 });
+    }
+
+    // 校验 PO 行数据完整性
+    const orderQty = parseFloat(poLine.quantity);
+    if (isNaN(orderQty) || orderQty <= 0) {
+      return NextResponse.json({ error: '采购订单行数量无效', detail: `quantity: ${poLine.quantity}` }, { status: 400 });
     }
 
     // 获取 PO 头信息用于快照
@@ -84,7 +105,6 @@ export async function POST(request: NextRequest) {
 
     // 计算收货后的净收货数量
     const currentReceived = parseFloat(poLine.received_qty || '0');
-    const grQuantity = parseFloat(body.quantity);
     
     let newReceivedQty: number;
     if (grType === 'out') {
@@ -96,7 +116,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 计算未收货数量
-    const orderQty = parseFloat(poLine.quantity);
     const pendingQty = Math.max(0, orderQty - newReceivedQty);
 
     // 检测超收（收货数量超过订单的 5%）
