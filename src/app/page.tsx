@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { purchaseRequestsApi, purchaseOrdersApi, suppliersApi, materialsApi } from '@/lib/api';
 
 interface DashboardStats {
   totalPRs: number;
@@ -27,7 +28,44 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(false);
+    async function fetchStats() {
+      try {
+        // 并行获取所有统计数据
+        const [prData, poData, supplierData, materialData] = await Promise.all([
+          purchaseRequestsApi.list({ pageSize: 1 }),
+          purchaseOrdersApi.list({ pageSize: 1 }),
+          suppliersApi.list({ pageSize: 1 }),
+          materialsApi.list({ pageSize: 1 }),
+        ]);
+
+        // 获取待审批 PR 数量
+        const pendingPRData = await purchaseRequestsApi.list({ 
+          pageSize: 1, 
+          status: 'submitted' 
+        });
+
+        // 获取待发货 PO 数量（已发送状态）
+        const pendingPOData = await purchaseOrdersApi.list({ 
+          pageSize: 1, 
+          status: 'sent' 
+        });
+
+        setStats({
+          totalPRs: prData.total || 0,
+          pendingPRs: pendingPRData.total || 0,
+          totalPOs: poData.total || 0,
+          pendingPOs: pendingPOData.total || 0,
+          totalSuppliers: supplierData.total || 0,
+          totalMaterials: materialData.total || 0,
+        });
+      } catch (error) {
+        console.error('Failed to fetch dashboard stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchStats();
   }, []);
 
   if (loading) {

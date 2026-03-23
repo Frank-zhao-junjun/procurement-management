@@ -101,11 +101,12 @@ export const grTypeEnum = pgEnum("gr_type", [
   "out",        // 退货
 ]);
 
-// 用户角色
+// 用户角色（含系统角色）
 export const userRoleEnum = pgEnum("user_role", [
   "requester",  // 需求人
   "manager",    // 审批人/经理
   "buyer",      // 采购员
+  "system",     // 系统操作（审计日志用）
 ]);
 
 // ============ 主数据表 ============
@@ -458,6 +459,54 @@ export const systemConfigs = pgTable(
   }
 );
 
+// PO 发送失败记录
+export const poSendFailures = pgTable(
+  "po_send_failures",
+  {
+    id: serial().primaryKey(),
+    poId: integer("po_id").notNull().references(() => purchaseOrders.id),
+    failureReason: text("failure_reason"),
+    retryCount: integer("retry_count").default(0),
+    maxRetries: integer("max_retries").default(3),
+    status: varchar("status", { length: 20 }).default("pending"), // pending/retrying/resolved/failed
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("psf_po_idx").on(table.poId),
+    index("psf_status_idx").on(table.status),
+    index("psf_next_retry_idx").on(table.nextRetryAt),
+  ]
+);
+
+// 飞书通知记录
+export const feishuNotifications = pgTable(
+  "feishu_notifications",
+  {
+    id: serial().primaryKey(),
+    entityType: varchar("entity_type", { length: 50 }).notNull(),
+    entityId: integer("entity_id").notNull(),
+    eventType: varchar("event_type", { length: 50 }).notNull(),
+    recipient: varchar("recipient", { length: 100 }).notNull(),
+    message: text("message"),
+    status: varchar("status", { length: 20 }).default("pending"), // pending/sent/failed
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("fn_entity_idx").on(table.entityType, table.entityId),
+    index("fn_status_idx").on(table.status),
+    index("fn_created_idx").on(table.createdAt),
+  ]
+);
+
 // ============ Zod Schemas ============
 
 const { createInsertSchema: createCoercedInsertSchema } = createSchemaFactory({
@@ -607,3 +656,7 @@ export type InsertGoodsReceipt = z.infer<typeof insertGoodsReceiptSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 
 export type FeishuBinding = typeof feishuBindings.$inferSelect;
+
+export type POSendFailure = typeof poSendFailures.$inferSelect;
+
+export type FeishuNotification = typeof feishuNotifications.$inferSelect;

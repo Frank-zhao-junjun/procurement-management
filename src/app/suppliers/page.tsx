@@ -24,6 +24,7 @@ export default function SuppliersPage() {
       const data = await suppliersApi.list({
         page,
         pageSize,
+        search: search || undefined, // 传递搜索参数
       });
       setSuppliers(data.data || []);
       setTotal(data.total || 0);
@@ -32,7 +33,7 @@ export default function SuppliersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, search]); // 添加 search 依赖
 
   useEffect(() => {
     fetchSuppliers();

@@ -14,7 +14,7 @@ const SEQ_FIELD_MAP: Record<string, string> = {
   'SC': 'task_number',
   'Q': 'quote_number',
   'QT': 'quote_number',  // 兼容旧前缀
-  'FA': 'agreement_number',
+  'FA': 'fa_number',     // 修复：使用正确的字段名
   'PO': 'po_number',
   'GR': 'gr_number',
   'RT': 'gr_number',    // 退货使用 GR 前缀，类型区分

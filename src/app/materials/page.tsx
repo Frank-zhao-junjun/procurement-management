@@ -24,6 +24,7 @@ export default function MaterialsPage() {
       const data = await materialsApi.list({
         page,
         pageSize,
+        search: search || undefined, // 传递搜索参数
       });
       setMaterials(data.data || []);
       setTotal(data.total || 0);
@@ -32,7 +33,7 @@ export default function MaterialsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, search]); // 添加 search 依赖
 
   useEffect(() => {
     fetchMaterials();

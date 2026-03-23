@@ -120,7 +120,7 @@ export const purchaseOrdersApi = {
 
 // 供应商 API
 export const suppliersApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; search?: string }) =>
     api.get<{ data: any[]; total: number }>('/suppliers', params),
 
   get: (id: number) =>
@@ -135,7 +135,7 @@ export const suppliersApi = {
 
 // 物料 API
 export const materialsApi = {
-  list: (params?: { page?: number; pageSize?: number }) =>
+  list: (params?: { page?: number; pageSize?: number; search?: string }) =>
     api.get<{ data: any[]; total: number }>('/materials', params),
 
   get: (id: number) =>

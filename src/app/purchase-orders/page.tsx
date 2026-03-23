@@ -31,6 +31,7 @@ export default function PurchaseOrdersPage() {
       const data = await purchaseOrdersApi.list({
         page,
         pageSize,
+        status: statusFilter || undefined, // 传递状态筛选
       });
       setOrders(data.data || []);
       setTotal(data.total || 0);
@@ -39,7 +40,7 @@ export default function PurchaseOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, statusFilter]); // 添加 statusFilter 依赖
 
   useEffect(() => {
     fetchOrders();
@@ -82,35 +83,50 @@ export default function PurchaseOrdersPage() {
               <Button
                 variant={statusFilter === '' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setStatusFilter('')}
+                onClick={() => {
+                  setStatusFilter('');
+                  setPage(1);
+                }}
               >
                 全部
               </Button>
               <Button
                 variant={statusFilter === 'draft' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setStatusFilter('draft')}
+                onClick={() => {
+                  setStatusFilter('draft');
+                  setPage(1);
+                }}
               >
                 草稿
               </Button>
               <Button
                 variant={statusFilter === 'sent' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setStatusFilter('sent')}
+                onClick={() => {
+                  setStatusFilter('sent');
+                  setPage(1);
+                }}
               >
                 已发送
               </Button>
               <Button
                 variant={statusFilter === 'partial' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setStatusFilter('partial')}
+                onClick={() => {
+                  setStatusFilter('partial');
+                  setPage(1);
+                }}
               >
                 部分收货
               </Button>
               <Button
                 variant={statusFilter === 'received' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setStatusFilter('received')}
+                onClick={() => {
+                  setStatusFilter('received');
+                  setPage(1);
+                }}
               >
                 已收货
               </Button>
