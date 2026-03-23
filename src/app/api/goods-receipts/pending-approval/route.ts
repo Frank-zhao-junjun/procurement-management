@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup, canApprove, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canApprove } from '@/lib/role-filter';
 
 // GET /api/goods-receipts/pending-approval - 获取待审批的超收收货单
 // 仅 Manager 可访问
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error, count } = await client
       .from('goods_receipts')
-      .select('*, purchase_orders(po_number, supplier_snapshot), purchase_order_lines(*)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .eq('status', 'pending_approval')
       .eq('is_overdelivery', true)
       .order('created_at', { ascending: false })

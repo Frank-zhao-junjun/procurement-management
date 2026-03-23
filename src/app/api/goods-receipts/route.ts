@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('goods_receipts')
-      .select('*, purchase_orders(po_number, supplier_snapshot), purchase_order_lines(*)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
@@ -63,13 +63,20 @@ export async function POST(request: NextRequest) {
     // 获取 PO 行信息
     const { data: poLine, error: poLineError } = await client
       .from('purchase_order_lines')
-      .select('*, purchase_orders(*)')
+      .select('*')
       .eq('id', body.poLineId)
       .single();
 
     if (poLineError) {
       return NextResponse.json({ error: 'PO line not found' }, { status: 404 });
     }
+
+    // 获取 PO 头信息用于快照
+    const { data: poHeader } = await client
+      .from('purchase_orders')
+      .select('*')
+      .eq('id', body.poId || poLine.order_id)
+      .single();
 
     // 生成 GR/RT 编号（使用上海时区 + 99上限）
     const grType = body.grType || 'in';
@@ -95,12 +102,25 @@ export async function POST(request: NextRequest) {
     // 检测超收（收货数量超过订单的 5%）
     let isOverdelivery = false;
     let overdeliveryRatio = 0;
-    let overdeliveryApproval = false;
     
     if (grType === 'in' && newReceivedQty > orderQty) {
       overdeliveryRatio = (newReceivedQty - orderQty) / orderQty;
       isOverdelivery = overdeliveryRatio > OVERDELIVERY_THRESHOLD;
     }
+
+    // 构建快照数据
+    const poSnapshot = poHeader ? JSON.stringify({
+      po_number: poHeader.po_number,
+      supplier_snapshot: poHeader.supplier_snapshot,
+      status: poHeader.status,
+    }) : null;
+    
+    const poLineSnapshot = JSON.stringify({
+      material_snapshot: poLine.material_snapshot,
+      quantity: poLine.quantity,
+      unit_price: poLine.unit_price,
+      received_qty: poLine.received_qty,
+    });
 
     // 如果超收且当前角色不是 manager，需要审批
     if (isOverdelivery && role !== 'manager') {
@@ -120,6 +140,8 @@ export async function POST(request: NextRequest) {
           status: 'pending_approval', // 待审批状态
           is_overdelivery: true,
           overdelivery_ratio: overdeliveryRatio,
+          po_snapshot: poSnapshot,
+          po_line_snapshot: poLineSnapshot,
         })
         .select()
         .single();
@@ -197,6 +219,8 @@ export async function POST(request: NextRequest) {
         receipt_time: new Date().toTimeString().slice(0, 8),
         receiver: actor,
         notes: body.notes || null,
+        po_snapshot: poSnapshot,
+        po_line_snapshot: poLineSnapshot,
       })
       .select()
       .single();

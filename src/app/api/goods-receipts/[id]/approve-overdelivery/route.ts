@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup } from '@/lib/role-filter';
 
 // POST /api/goods-receipts/[id]/approve-overdelivery - 审批超收收货单
 export async function POST(
@@ -23,7 +23,7 @@ export async function POST(
     // 获取待审批的收货单
     const { data: gr, error } = await client
       .from('goods_receipts')
-      .select('*, purchase_order_lines(*)')
+      .select('*')
       .eq('id', parseInt(id, 10))
       .eq('status', 'pending_approval')
       .single();
@@ -31,6 +31,13 @@ export async function POST(
     if (error || !gr) {
       return NextResponse.json({ error: '收货单不存在或不在待审批状态' }, { status: 404 });
     }
+
+    // 获取 PO 行数据
+    const { data: poLine } = await client
+      .from('purchase_order_lines')
+      .select('*')
+      .eq('id', gr.po_line_id)
+      .single();
 
     if (approved) {
       // 审批通过：更新收货单状态，更新 PO 行
@@ -44,7 +51,6 @@ export async function POST(
         .eq('id', parseInt(id, 10));
 
       // 更新 PO 行：审批通过后把本次收货量加入已收货
-      const poLine = gr.purchase_order_lines;
       const oldReceived = parseFloat(poLine?.received_qty || '0');
       const orderQty = parseFloat(poLine?.quantity || '0');
       const grQty = parseFloat(gr.quantity || '0');
