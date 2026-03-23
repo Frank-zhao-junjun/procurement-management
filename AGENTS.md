@@ -79,7 +79,34 @@ User-Agent: ProcurementSystem-Webhook/1.0
 - 超时时间：10 秒
 - 支持重试（由调用方负责）
 
-### 2. 调用 API
+### 支持的事件
+
+#### 1. PR 提交
+```json
+{
+  "event": "pr_submitted",
+  "prId": 1,
+  "prNumber": "PR-20250401-01",
+  "submittedBy": "requester-agent",
+  "submittedAt": "2025-04-01T10:30:00+08:00"
+}
+```
+
+#### 2. 超收待审批
+```json
+{
+  "event": "overdelivery_pending",
+  "grId": 1,
+  "grNumber": "GR-20250401-01",
+  "poId": 1,
+  "poLineId": 1,
+  "orderQty": 100,
+  "grQuantity": 110,
+  "overdeliveryRatio": 0.1,
+  "requestedBy": "buyer-agent",
+  "requestedAt": "2025-04-01T14:30:00+08:00"
+}
+```
 
 ```bash
 # 只需传 X-Actor，系统自动解析角色
