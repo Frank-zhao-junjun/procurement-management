@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
-import { getUserIdentityWithLookup, filterGoodsReceipts, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup } from '@/lib/role-filter';
 import { getManagerWebhooks } from '@/storage/database/agent-binding';
+import { getBeijingDateString, getBeijingTimeString, getBeijingISOString } from '@/lib/datetime';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
@@ -61,11 +62,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // 支持多种参数格式（驼峰式和下划线式）
+    // 日期格式: YYYY-MM-DD (北京时间)
+    // 时间格式: HH:mm:ss (北京时间)
     const poLineId = body.poLineId || body.po_line_id;
     const poId = body.poId || body.po_id;
     const grType = body.grType || body.gr_type || 'in';
-    // receiptDate 支持驼峰和下划线格式，未提供时使用今天
-    const receiptDate = body.receiptDate || body.receipt_date || new Date().toISOString().slice(0, 10);
+    // receiptDate 支持驼峰和下划线格式，未提供时使用今天(北京时间)
+    const receiptDate = body.receiptDate || body.receipt_date || getBeijingDateString();
+    const receiptTime = getBeijingTimeString();
 
     // 校验必填参数
     if (!poLineId) {
@@ -159,7 +163,7 @@ export async function POST(request: NextRequest) {
           gr_type: grType,
           quantity: body.quantity,
           receipt_date: receiptDate,
-          receipt_time: new Date().toTimeString().slice(0, 8),
+          receipt_time: receiptTime,
           receiver: actor,
           notes: body.notes || null,
           status: 'pending_approval', // 待审批状态
@@ -205,7 +209,7 @@ export async function POST(request: NextRequest) {
         grQuantity: grQuantity,
         overdeliveryRatio: overdeliveryRatio,
         requestedBy: actor,
-        requestedAt: new Date().toISOString(),
+        requestedAt: getBeijingISOString(),
       }).catch(err => {
         console.error('Failed to notify managers:', err);
       });
@@ -224,7 +228,7 @@ export async function POST(request: NextRequest) {
         received_qty: newReceivedQty,
         pending_qty: pendingQty,
         status: pendingQty === 0 ? 'received' : (newReceivedQty > 0 ? 'partial_received' : 'ordered'),
-        updated_at: new Date().toISOString(),
+        updated_at: getBeijingISOString(),
       })
       .eq('id', poLineId);
 
@@ -241,7 +245,7 @@ export async function POST(request: NextRequest) {
         gr_type: grType,
         quantity: body.quantity,
         receipt_date: receiptDate,
-        receipt_time: new Date().toTimeString().slice(0, 8),
+        receipt_time: receiptTime,
         receiver: actor,
         notes: body.notes || null,
         po_snapshot: poSnapshot,
@@ -261,7 +265,7 @@ export async function POST(request: NextRequest) {
         .from('purchase_request_lines')
         .update({
           progress: prLineStatus,
-          updated_at: new Date().toISOString(),
+          updated_at: getBeijingISOString(),
         })
         .eq('id', poLine.pr_line_id);
     }
@@ -316,7 +320,7 @@ async function updatePOStatus(client: any, poId: number) {
       .from('purchase_orders')
       .update({
         status: newStatus,
-        updated_at: new Date().toISOString(),
+        updated_at: getBeijingISOString(),
       })
       .eq('id', poId);
   } catch (error) {
