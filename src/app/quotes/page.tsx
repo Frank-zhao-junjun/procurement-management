@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Award } from 'lucide-react';
+import { getIdentityHeaders } from '@/lib/identity-store';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: '草稿', variant: 'secondary' },
@@ -265,6 +266,7 @@ export default function QuotesPage() {
                     <TableHead>状态</TableHead>
                     <TableHead>授标状态</TableHead>
                     <TableHead>创建人</TableHead>
+                    <TableHead>操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -289,6 +291,48 @@ export default function QuotesPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>{quote.created_by}</TableCell>
+                      <TableCell>
+                        {quote.awarded === 'pending' && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={async () => {
+                              if (confirm('确认授标给该供应商？授标后将自动创建采购订单。')) {
+                                try {
+                                  const response = await fetch(`/api/quotes/${quote.id}/award`, {
+                                    method: 'POST',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      ...getIdentityHeaders(),
+                                    },
+                                  });
+                                  const result = await response.json();
+                                  if (result.success) {
+                                    alert(`授标成功！已创建采购订单: ${result.purchaseOrder.po_number}`);
+                                    // 刷新列表
+                                    const data = await quotesApi.list({ page, pageSize });
+                                    setQuotes(data.data || []);
+                                    setTotal(data.total || 0);
+                                  } else {
+                                    alert(result.error || '授标失败');
+                                  }
+                                } catch (error: any) {
+                                  alert(error.message || '授标失败');
+                                }
+                              }
+                            }}
+                          >
+                            <Award className="w-4 h-4 mr-1" />
+                            授标
+                          </Button>
+                        )}
+                        {quote.awarded === 'awarded' && (
+                          <span className="text-green-600 text-sm">已中标</span>
+                        )}
+                        {quote.awarded === 'rejected' && (
+                          <span className="text-gray-400 text-sm">未中标</span>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

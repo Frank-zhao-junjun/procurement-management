@@ -165,11 +165,14 @@ export const sourcingTasksApi = {
 
 // 报价单 API
 export const quotesApi = {
-  list: (params?: { page?: number; pageSize?: number; status?: string }) =>
+  list: (params?: { page?: number; pageSize?: number; status?: string; sourcingTaskId?: number }) =>
     api.get<{ data: any[]; total: number }>('/quotes', params),
 
   create: (data: any) =>
     api.post<{ data: any }>('/quotes', data),
+
+  award: (id: number) =>
+    api.post<{ success: boolean; quote: any; purchaseOrder: any }>(`/quotes/${id}/award`),
 };
 
 // 收货单 API
