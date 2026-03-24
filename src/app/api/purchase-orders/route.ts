@@ -82,59 +82,56 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 生成 PO 编号（使用上海时区 + 99上限）
+    // 生成 PO 编号
     const poNumber = await numberGenerators.po();
 
-    // 计算到货日期（最晚日期）
-    let deliveryDate = body.deliveryDate;
-    if (body.lines && body.lines.length > 0) {
-      const dates = body.lines
-        .map((line: any) => line.expectedDeliveryDate)
-        .filter(Boolean);
-      if (dates.length > 0) {
-        deliveryDate = dates.sort().reverse()[0];
-      }
-    }
-
-    // 构建行项目快照
-    const linesSnapshot = body.lines ? JSON.stringify(body.lines) : null;
+    // 支持多种参数格式（驼峰式和下划线式）
+    const supplierId = body.supplierId || body.supplier_id || null;
+    const supplierSnapshot = body.supplierSnapshot || body.supplier_snapshot || 
+      (typeof body.supplier_snapshot === 'object' ? body.supplier_snapshot?.name : body.supplier_snapshot) || '';
+    const deliveryDate = body.deliveryDate || body.delivery_date || null;
+    const prId = body.prId || body.pr_id || null;
+    
+    // 订单行支持多种格式
+    const orderLines = body.lines || body.items || [];
 
     // 插入主表
     const { data: po, error: poError } = await client
       .from('purchase_orders')
       .insert({
         po_number: poNumber,
-        supplier_id: body.supplierId || null,
-        supplier_snapshot: body.supplierSnapshot || '',
-        delivery_date: deliveryDate || null,
+        supplier_id: supplierId,
+        supplier_snapshot: supplierSnapshot,
+        delivery_date: deliveryDate,
         status: 'draft',
         created_by: actor,
-        lines_snapshot: linesSnapshot,
       })
       .select()
       .single();
 
     if (poError) {
+      console.error('PO创建失败:', poError);
       return NextResponse.json({ error: poError.message }, { status: 500 });
     }
 
     // 插入行项目
-    if (body.lines && body.lines.length > 0) {
-      const lines = body.lines.map((line: any, index: number) => ({
+    if (orderLines.length > 0) {
+      const lines = orderLines.map((line: any, index: number) => ({
         order_id: po.id,
         line_number: index + 1,
-        pr_id: line.prId,
-        pr_line_id: line.prLineId,
-        material_id: line.materialId || null,
-        material_snapshot: line.materialSnapshot || line.materialName || '',
-        quantity: line.quantity,
-        unit_price: line.unitPrice || 0,
-        total_price: (line.quantity || 0) * (line.unitPrice || 0),
+        pr_id: line.prId || line.pr_id || prId,
+        pr_line_id: line.prLineId || line.pr_line_id || null,
+        material_id: line.materialId || line.material_id || null,
+        material_snapshot: line.materialSnapshot || line.material_snapshot || 
+          line.materialName || line.material_name || '',
+        quantity: line.quantity || line.qty || 0,
+        unit_price: line.unitPrice || line.unit_price || line.price || 0,
+        total_price: (line.quantity || line.qty || 0) * (line.unitPrice || line.unit_price || line.price || 0),
         received_qty: 0,
-        pending_qty: line.quantity,
+        pending_qty: line.quantity || line.qty || 0,
         status: 'ordered',
-        fa_id: line.faId || null,
-        sourcing_task_id: line.sourcingTaskId || null,
+        fa_id: line.faId || line.fa_id || null,
+        sourcing_task_id: line.sourcingTaskId || line.sourcing_task_id || null,
       }));
 
       const { error: linesError } = await client
@@ -142,23 +139,25 @@ export async function POST(request: NextRequest) {
         .insert(lines);
 
       if (linesError) {
+        console.error('订单行创建失败:', linesError);
         // 回滚
         await client.from('purchase_orders').delete().eq('id', po.id);
-        return NextResponse.json({ error: linesError.message }, { status: 500 });
+        return NextResponse.json({ error: `订单行创建失败: ${linesError.message}` }, { status: 500 });
       }
 
       // 更新 PR 行状态
-      for (const line of body.lines) {
-        if (line.prLineId) {
+      for (const line of orderLines) {
+        const prLineId = line.prLineId || line.pr_line_id;
+        if (prLineId) {
           await client
             .from('purchase_request_lines')
             .update({
               progress: 'ordered',
               purchase_order_id: po.id,
-              po_line_number: body.lines.indexOf(line) + 1,
+              po_line_number: orderLines.indexOf(line) + 1,
               updated_at: new Date().toISOString(),
             })
-            .eq('id', line.prLineId);
+            .eq('id', prLineId);
         }
       }
     }
@@ -170,11 +169,30 @@ export async function POST(request: NextRequest) {
       action: 'create',
       actor,
       actor_role: role,
-      detail: { po_number: poNumber, lines_count: body.lines?.length || 0 },
+      detail: { po_number: poNumber, lines_count: orderLines.length },
     });
 
-    return NextResponse.json({ data: po }, { status: 201 });
+    // 返回完整数据
+    const { data: fullPo } = await client
+      .from('purchase_orders')
+      .select('*')
+      .eq('id', po.id)
+      .single();
+
+    const { data: poLines } = await client
+      .from('purchase_order_lines')
+      .select('*')
+      .eq('order_id', po.id);
+
+    return NextResponse.json({ 
+      success: true,
+      data: {
+        ...fullPo,
+        lines: poLines || [],
+      }
+    }, { status: 201 });
   } catch (error: any) {
+    console.error('PO创建异常:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
