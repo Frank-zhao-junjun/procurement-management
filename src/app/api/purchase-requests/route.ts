@@ -57,8 +57,11 @@ export async function POST(request: NextRequest) {
     // 生成 PR 编号（使用上海时区 + 99上限）
     const prNumber = await numberGenerators.pr();
 
+    // 支持 items 和 lines 两种参数格式
+    const linesData = body.lines || body.items || [];
+    
     // 构建行项目快照
-    const linesSnapshot = body.lines ? JSON.stringify(body.lines) : null;
+    const linesSnapshot = linesData.length > 0 ? JSON.stringify(linesData) : null;
 
     // 插入主表
     const { data: pr, error: prError } = await client
@@ -79,16 +82,16 @@ export async function POST(request: NextRequest) {
     }
 
     // 插入行项目
-    if (body.lines && body.lines.length > 0) {
-      const lines = body.lines.map((line: any, index: number) => ({
+    if (linesData.length > 0) {
+      const lines = linesData.map((line: any, index: number) => ({
         request_id: pr.id,
         line_number: index + 1,
-        material_id: line.materialId || null,
-        material_snapshot: line.materialSnapshot || line.requirementText,
-        requirement_text: line.requirementText,
-        quantity: line.quantity,
-        est_unit_price: line.estUnitPrice || null,
-        expected_delivery_date: line.expectedDeliveryDate || null,
+        material_id: line.materialId || line.material_id || null,
+        material_snapshot: line.materialSnapshot || line.material_name || line.requirementText || '',
+        requirement_text: line.requirementText || line.description || '',
+        quantity: line.quantity || line.qty || 0,
+        est_unit_price: line.estUnitPrice || line.est_unit_price || null,
+        expected_delivery_date: line.expectedDeliveryDate || line.expected_delivery_date || null,
         note: line.note || null,
         progress: 'pending',
       }));
@@ -111,10 +114,27 @@ export async function POST(request: NextRequest) {
       action: 'create',
       actor,
       actor_role: role,
-      detail: { pr_number: prNumber, lines_count: body.lines?.length || 0 },
+      detail: { pr_number: prNumber, lines_count: linesData.length },
     });
 
-    return NextResponse.json({ data: pr }, { status: 201 });
+    // 返回完整数据（包括行项目）
+    const { data: fullPr } = await client
+      .from('purchase_requests')
+      .select('*')
+      .eq('id', pr.id)
+      .single();
+
+    const { data: prLines } = await client
+      .from('purchase_request_lines')
+      .select('*')
+      .eq('request_id', pr.id);
+
+    return NextResponse.json({ 
+      data: {
+        ...fullPr,
+        lines: prLines || [],
+      }
+    }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
