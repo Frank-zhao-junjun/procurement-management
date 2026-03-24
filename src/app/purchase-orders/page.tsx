@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useIdentityChange } from '@/hooks/use-identity-change';
+import { getIdentityHeaders } from '@/lib/identity-store';
 
 const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   draft: { label: '草稿', variant: 'secondary' },
@@ -57,6 +58,32 @@ export default function PurchaseOrdersPage() {
       fetchOrders();
     } catch (error) {
       alert('更新状态失败');
+    }
+  };
+
+  const handleDelete = async (id: number, poNumber: string) => {
+    if (!confirm(`确认删除采购订单 ${poNumber}？此操作不可撤销。`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/purchase-orders/${id}`, {
+        method: 'DELETE',
+        headers: {
+          ...getIdentityHeaders(),
+        },
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        alert(result.message);
+        fetchOrders();
+      } else {
+        alert(result.error || '删除失败');
+      }
+    } catch (error: any) {
+      alert(error.message || '删除失败');
     }
   };
 
@@ -179,13 +206,23 @@ export default function PurchaseOrdersPage() {
                             </a>
                           </Button>
                           {order.status === 'draft' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUpdateStatus(order.id, 'sent')}
-                            >
-                              标记已发送
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleUpdateStatus(order.id, 'sent')}
+                              >
+                                发送
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => handleDelete(order.id, order.po_number)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
                           )}
                           {order.status === 'sent' && (
                             <Button
