@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database';
+import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, filterPurchaseOrders, getRequesterAccessiblePOIds, type Role } from '@/lib/role-filter';
 
@@ -7,6 +7,8 @@ import { getUserIdentityWithLookup, filterPurchaseOrders, getRequesterAccessible
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    // 查询 sent 状态的订单时使用服务角色（收货场景需要看到所有已发送的订单）
+    const serviceClient = getServiceRoleClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
@@ -15,7 +17,10 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    let query = client
+    // 对于 sent 状态的订单（收货场景），使用服务角色查询以绕过 RLS
+    const queryClient = status === 'sent' ? serviceClient : client;
+    
+    let query = queryClient
       .from('purchase_orders')
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
@@ -29,12 +34,15 @@ export async function GET(request: NextRequest) {
       query = query.eq('supplier_id', parseInt(supplierId, 10));
     }
 
-    // 按角色过滤：requester 仅能看自己 PR 对应的 PO
-    if (role === 'requester') {
-      const allowedIds = await getRequesterAccessiblePOIds(client, actor);
-      query = allowedIds.length > 0 ? query.in('id', allowedIds) : query.eq('id', -1);
-    } else {
-      query = filterPurchaseOrders(query, role as Role, actor);
+    // 对于非 sent 状态，按角色过滤
+    if (status !== 'sent') {
+      // 按角色过滤：requester 仅能看自己 PR 对应的 PO
+      if (role === 'requester') {
+        const allowedIds = await getRequesterAccessiblePOIds(client, actor);
+        query = allowedIds.length > 0 ? query.in('id', allowedIds) : query.eq('id', -1);
+      } else {
+        query = filterPurchaseOrders(query, role as Role, actor);
+      }
     }
 
     const { data, error, count } = await query;
@@ -43,11 +51,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 获取每个订单的行数
+    // 获取每个订单的行数（sent 状态时使用服务角色）
     let dataWithLinesCount = data;
     if (data && data.length > 0) {
       const poIds = data.map(po => po.id);
-      const { data: linesData } = await client
+      const { data: linesData } = await queryClient
         .from('purchase_order_lines')
         .select('order_id')
         .in('order_id', poIds);
