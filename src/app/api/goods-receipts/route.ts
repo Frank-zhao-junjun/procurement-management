@@ -60,8 +60,15 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
+    // 支持多种参数格式（驼峰式和下划线式）
+    const poLineId = body.poLineId || body.po_line_id;
+    const poId = body.poId || body.po_id;
+    const grType = body.grType || body.gr_type || 'in';
+    // receiptDate 支持驼峰和下划线格式，未提供时使用今天
+    const receiptDate = body.receiptDate || body.receipt_date || new Date().toISOString().slice(0, 10);
+
     // 校验必填参数
-    if (!body.poLineId) {
+    if (!poLineId) {
       return NextResponse.json({ error: 'poLineId 为必填参数' }, { status: 400 });
     }
 
@@ -74,7 +81,7 @@ export async function POST(request: NextRequest) {
     const { data: poLine, error: poLineError } = await serviceClient
       .from('purchase_order_lines')
       .select('*')
-      .eq('id', body.poLineId)
+      .eq('id', poLineId)
       .single();
 
     if (poLineError) {
@@ -83,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!poLine) {
-      return NextResponse.json({ error: `采购订单行不存在 (ID: ${body.poLineId})` }, { status: 404 });
+      return NextResponse.json({ error: `采购订单行不存在 (ID: ${poLineId})` }, { status: 404 });
     }
 
     // 校验 PO 行数据完整性
@@ -96,11 +103,10 @@ export async function POST(request: NextRequest) {
     const { data: poHeader } = await serviceClient
       .from('purchase_orders')
       .select('*')
-      .eq('id', body.poId || poLine.order_id)
+      .eq('id', poId || poLine.order_id)
       .single();
 
     // 生成 GR/RT 编号（使用上海时区 + 99上限）
-    const grType = body.grType || 'in';
     const grNumber = await generateGRNumber(grType);
 
     // 计算收货后的净收货数量
@@ -152,7 +158,7 @@ export async function POST(request: NextRequest) {
           po_line_id: body.poLineId,
           gr_type: grType,
           quantity: body.quantity,
-          receipt_date: body.receiptDate,
+          receipt_date: receiptDate,
           receipt_time: new Date().toTimeString().slice(0, 8),
           receiver: actor,
           notes: body.notes || null,
@@ -193,8 +199,8 @@ export async function POST(request: NextRequest) {
         event: 'overdelivery_pending',
         grId: gr.id,
         grNumber: grNumber,
-        poId: body.poId || poLine.order_id,
-        poLineId: body.poLineId,
+        poId: poId || poLine.order_id,
+        poLineId: poLineId,
         orderQty: orderQty,
         grQuantity: grQuantity,
         overdeliveryRatio: overdeliveryRatio,
@@ -220,7 +226,7 @@ export async function POST(request: NextRequest) {
         status: pendingQty === 0 ? 'received' : (newReceivedQty > 0 ? 'partial_received' : 'ordered'),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', body.poLineId);
+      .eq('id', poLineId);
 
     // 检查是否需要更新 PO 头状态
     await updatePOStatus(client, poLine.order_id);
@@ -230,11 +236,11 @@ export async function POST(request: NextRequest) {
       .from('goods_receipts')
       .insert({
         gr_number: grNumber,
-        po_id: body.poId || poLine.order_id,
-        po_line_id: body.poLineId,
+        po_id: poId || poLine.order_id,
+        po_line_id: poLineId,
         gr_type: grType,
         quantity: body.quantity,
-        receipt_date: body.receiptDate,
+        receipt_date: receiptDate,
         receipt_time: new Date().toTimeString().slice(0, 8),
         receiver: actor,
         notes: body.notes || null,
@@ -269,10 +275,11 @@ export async function POST(request: NextRequest) {
       actor_role: role,
       detail: {
         gr_number: grNumber,
-        po_id: body.poId,
-        po_line_id: body.poLineId,
+        po_id: poId,
+        po_line_id: poLineId,
         quantity: body.quantity,
         gr_type: grType,
+        receipt_date: receiptDate,
         new_received_qty: newReceivedQty,
         pending_qty: pendingQty,
       },
