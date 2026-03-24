@@ -10,8 +10,8 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
 
+    // 所有 Agent 都可以查询任何采购申请（移除角色过滤）
     const { data, error } = await client
       .from('purchase_requests')
       .select('*')
@@ -23,11 +23,6 @@ export async function GET(
         return NextResponse.json({ error: 'Purchase request not found' }, { status: 404 });
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // 需求人只能查看自己创建的申请
-    if (role === 'requester' && data.applicant !== actor) {
-      return NextResponse.json({ error: '无权访问此采购申请' }, { status: 403 });
     }
 
     // 获取行项目

@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
+import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentityWithLookup, filterPurchaseOrders, getRequesterAccessiblePOIds, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup } from '@/lib/role-filter';
 
 // GET /api/purchase-orders - 获取采购订单列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    // 查询 sent 状态的订单时使用服务角色（收货场景需要看到所有已发送的订单）
-    const serviceClient = getServiceRoleClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const status = searchParams.get('status');
@@ -17,10 +15,8 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    // 对于 sent 状态的订单（收货场景），使用服务角色查询以绕过 RLS
-    const queryClient = status === 'sent' ? serviceClient : client;
-    
-    let query = queryClient
+    // 所有 Agent 都可以查询任何订单（移除角色过滤）
+    let query = client
       .from('purchase_orders')
       .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
@@ -34,39 +30,28 @@ export async function GET(request: NextRequest) {
       query = query.eq('supplier_id', parseInt(supplierId, 10));
     }
 
-    // 对于非 sent 状态，按角色过滤
-    if (status !== 'sent') {
-      // 按角色过滤：requester 仅能看自己 PR 对应的 PO
-      if (role === 'requester') {
-        const allowedIds = await getRequesterAccessiblePOIds(client, actor);
-        query = allowedIds.length > 0 ? query.in('id', allowedIds) : query.eq('id', -1);
-      } else {
-        query = filterPurchaseOrders(query, role as Role, actor);
-      }
-    }
-
     const { data, error, count } = await query;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 获取每个订单的行数（sent 状态时使用服务角色）
+    // 获取每个订单的行数
     let dataWithLinesCount = data;
     if (data && data.length > 0) {
-      const poIds = data.map(po => po.id);
-      const { data: linesData } = await queryClient
+      const poIds = data.map((po: any) => po.id);
+      const { data: linesData } = await client
         .from('purchase_order_lines')
         .select('order_id')
         .in('order_id', poIds);
 
       // 统计每个订单的行数
       const lineCounts: Record<number, number> = {};
-      (linesData || []).forEach(line => {
+      (linesData || []).forEach((line: any) => {
         lineCounts[line.order_id] = (lineCounts[line.order_id] || 0) + 1;
       });
 
-      dataWithLinesCount = data.map(po => ({
+      dataWithLinesCount = data.map((po: any) => ({
         ...po,
         lines_count: lineCounts[po.id] || 0,
       }));

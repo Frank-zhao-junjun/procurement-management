@@ -11,7 +11,6 @@ const OVERDELIVERY_THRESHOLD = 0.05;
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const grType = searchParams.get('grType');
     const poId = searchParams.get('poId');
@@ -19,6 +18,7 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
+    // 所有 Agent 都可以查询任何收货单（移除角色过滤）
     let query = client
       .from('goods_receipts')
       .select('*', { count: 'exact' })
@@ -32,9 +32,6 @@ export async function GET(request: NextRequest) {
     if (poId) {
       query = query.eq('po_id', parseInt(poId, 10));
     }
-
-    // 按角色过滤
-    query = filterGoodsReceipts(query, role as Role, actor);
 
     const { data, error, count } = await query;
 

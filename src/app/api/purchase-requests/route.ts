@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
+    // 所有 Agent 都可以查询任何采购申请（移除角色过滤）
     let query = client
       .from('purchase_requests')
       .select('*', { count: 'exact' })
@@ -25,11 +26,7 @@ export async function GET(request: NextRequest) {
       query = query.eq('status', status);
     }
 
-    // 按角色过滤
-    query = filterPurchaseRequests(query, role as Role, actor);
-
-    if (applicant && role === 'manager') {
-      // Manager 可以指定查看某个申请人的
+    if (applicant) {
       query = query.eq('applicant', applicant);
     }
 
