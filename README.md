@@ -186,6 +186,22 @@ psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
 
 ## 最近更新
 
+### v1.2.0 (2024-03-24)
+
+**新增功能：**
+- ✅ 新增 `POST /api/purchase-orders/[id]/lines` - 批量创建订单行
+- ✅ 新增 `GET /api/purchase-orders/[id]/lines` - 获取订单行列表
+
+**修复问题：**
+- ✅ 修复采购申请 `items` 参数未生效问题（同时支持 `items` 和 `lines`）
+- ✅ 修复供应商 ID 无效时外键约束失败问题（PO/FA/Quote 创建时验证）
+- ✅ 供应商不存在时返回清晰错误信息：`无效的供应商 ID: ${id}，该供应商不存在`
+
+**改进：**
+- 采购申请返回数据包含完整的行项目 (`lines`)
+- 订单行 API 支持 `items` 和 `lines` 两种参数格式
+- 增强字段兼容性（驼峰/下划线自动转换）
+
 ### v1.1.0 (2024-03-23)
 
 **修复问题：**

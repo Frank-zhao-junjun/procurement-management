@@ -191,9 +191,23 @@ POST /api/purchase-requests/check-materials
 
 ### 1. 创建采购申请（带物料确认）
 
+**参数说明**：
+- `items` 和 `lines` 参数等效，都可用于传递行项目数据
+- 支持驼峰 (`items`) 和下划线 (`items` 或 `items`) 两种格式
+
 **场景 A：所有物料都有精确匹配** → 直接创建 PR
 
 ```bash
+# 使用 items 参数
+POST /api/purchase-requests
+{
+  "reason": "办公设备采购",
+  "items": [
+    {"requirementText": "无线鼠标", "quantity": 10}
+  ]
+}
+
+# 或使用 lines 参数（效果相同）
 POST /api/purchase-requests
 {
   "reason": "办公设备采购",
@@ -297,14 +311,27 @@ PUT /api/quotes/{id}
 ### 5. 采购订单 (PO)
 
 ```bash
-# 创建 PO
+# 创建 PO（供应商 ID 必须存在，否则返回 400 错误）
 POST /api/purchase-orders
 {
-  "supplierId": 1,
+  "supplierId": 10,
+  "supplierSnapshot": "小米",
   "lines": [
     {"prLineId": 1, "quantity": 500, "unitPrice": 0.045}
   ]
 }
+
+# 向已有 PO 添加订单行
+POST /api/purchase-orders/{id}/lines
+-H "X-Role: buyer"
+{
+  "items": [
+    {"materialSnapshot": "键盘", "quantity": 10, "unitPrice": 200}
+  ]
+}
+
+# 获取订单行列表
+GET /api/purchase-orders/{id}/lines
 
 # 发送 PO（支持失败重试）
 POST /api/purchase-orders/{id}/send
@@ -372,7 +399,12 @@ GET /api/agent-bindings?role=manager
 
 | 状态码 | 说明 |
 |--------|------|
-| 400 | 请求参数错误 |
+| 400 | 请求参数错误（如：无效的供应商 ID: 17，该供应商不存在） |
 | 403 | 无权限操作 |
 | 404 | 资源不存在 |
 | 500 | 服务器内部错误 |
+
+**常见错误信息**：
+- `无效的供应商 ID: ${id}，该供应商不存在` - 供应商 ID 不存在于 suppliers 表
+- `只能向草稿状态的订单添加行` - PO 已发送或完成，无法修改
+- `只有 Buyer 或 Manager 可以添加订单行` - 权限不足 |
