@@ -84,6 +84,20 @@ export async function PATCH(
     };
 
     if (body.supplier_id !== undefined) {
+      // 如果设置 supplier_id，必须验证其有效性
+      if (body.supplier_id !== null) {
+        const { data: supplier, error: supplierError } = await client
+          .from('suppliers')
+          .select('id, name')
+          .eq('id', body.supplier_id)
+          .single();
+        
+        if (supplierError || !supplier) {
+          return NextResponse.json({ 
+            error: `无效的供应商 ID: ${body.supplier_id}，该供应商不存在` 
+          }, { status: 400 });
+        }
+      }
       updateFields.supplier_id = body.supplier_id;
     }
     if (body.supplier_snapshot !== undefined) {

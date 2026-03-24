@@ -74,6 +74,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 验证 supplierId 必须存在且有效（如果提供）
+    if (parsed.data.supplierId) {
+      const { data: supplier, error: supplierError } = await client
+        .from('suppliers')
+        .select('id, name')
+        .eq('id', parsed.data.supplierId)
+        .single();
+      
+      if (supplierError || !supplier) {
+        return NextResponse.json({ 
+          error: `无效的供应商 ID: ${parsed.data.supplierId}，该供应商不存在` 
+        }, { status: 400 });
+      }
+    }
+
     const quoteNumber = await numberGenerators.quote();
 
     const quantity = parseFloat(String(parsed.data.quantity || '0'));

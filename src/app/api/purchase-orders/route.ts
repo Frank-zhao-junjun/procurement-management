@@ -80,6 +80,23 @@ export async function POST(request: NextRequest) {
 
     // 支持多种参数格式（驼峰式和下划线式）
     const supplierId = body.supplierId || body.supplier_id || null;
+    
+    // 验证 supplierId 必须存在且有效
+    if (supplierId) {
+      const { data: supplier, error: supplierError } = await client
+        .from('suppliers')
+        .select('id, name')
+        .eq('id', supplierId)
+        .single();
+      
+      if (supplierError || !supplier) {
+        return NextResponse.json({ 
+          error: `无效的供应商 ID: ${supplierId}，该供应商不存在` 
+        }, { status: 400 });
+      }
+    }
+    
+    // 驼峰和下划线兼容
     const supplierSnapshot = body.supplierSnapshot || body.supplier_snapshot || 
       (typeof body.supplier_snapshot === 'object' ? body.supplier_snapshot?.name : body.supplier_snapshot) || '';
     const deliveryDate = body.deliveryDate || body.delivery_date || null;

@@ -61,6 +61,22 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actor, role } = await getUserIdentityWithLookup(request);
 
+    // 验证 supplierId 必须存在且有效（如果提供）
+    const supplierId = body.supplierId || body.supplier_id || null;
+    if (supplierId) {
+      const { data: supplier, error: supplierError } = await client
+        .from('suppliers')
+        .select('id, name')
+        .eq('id', supplierId)
+        .single();
+      
+      if (supplierError || !supplier) {
+        return NextResponse.json({ 
+          error: `无效的供应商 ID: ${supplierId}，该供应商不存在` 
+        }, { status: 400 });
+      }
+    }
+
     // 生成 FA 编号（使用上海时区 + 99上限）
     const faNumber = await numberGenerators.fa();
 
