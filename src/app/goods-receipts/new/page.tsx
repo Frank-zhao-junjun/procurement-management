@@ -1,9 +1,10 @@
-// 使用 dynamic 导入来避免 useSearchParams 在服务端渲染时的问题
+'use client';
+
 import dynamic from 'next/dynamic';
 
 const NewGoodsReceiptContent = dynamic(
   () => import('./NewGoodsReceiptContent'),
-  { 
+  {
     ssr: false,
     loading: () => (
       <div className="flex justify-center items-center min-h-[400px]">
