@@ -43,8 +43,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // 获取每个订单的行数
+    let dataWithLinesCount = data;
+    if (data && data.length > 0) {
+      const poIds = data.map(po => po.id);
+      const { data: linesData } = await client
+        .from('purchase_order_lines')
+        .select('order_id')
+        .in('order_id', poIds);
+
+      // 统计每个订单的行数
+      const lineCounts: Record<number, number> = {};
+      (linesData || []).forEach(line => {
+        lineCounts[line.order_id] = (lineCounts[line.order_id] || 0) + 1;
+      });
+
+      dataWithLinesCount = data.map(po => ({
+        ...po,
+        lines_count: lineCounts[po.id] || 0,
+      }));
+    }
+
     return NextResponse.json({
-      data,
+      data: dataWithLinesCount,
       total: count || 0,
       page,
       pageSize,

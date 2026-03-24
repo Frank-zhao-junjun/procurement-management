@@ -167,7 +167,7 @@ export default function PurchaseOrdersPage() {
                           {statusMap[order.status]?.label || order.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{order.purchase_order_lines?.length || 0}</TableCell>
+                      <TableCell>{order.lines_count || order.purchase_order_lines?.length || 0}</TableCell>
                       <TableCell>
                         {order.created_at ? new Date(order.created_at).toLocaleString('zh-CN') : '-'}
                       </TableCell>

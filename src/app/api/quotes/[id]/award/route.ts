@@ -83,12 +83,22 @@ export async function POST(
     // 3. 创建 PO
     const poNumber = await numberGenerators.po();
 
-    // 获取 PR 行的期望交货日期
-    const { data: prLine } = await client
-      .from('purchase_request_lines')
-      .select('expected_delivery_date')
-      .eq('id', sourcingTask.pr_line_id)
-      .single();
+    // 获取 PR 行的期望交货日期，如果没有则设置默认值（30天后）
+    let deliveryDate: string;
+    
+    if (sourcingTask.pr_line_id) {
+      const { data: prLine } = await client
+        .from('purchase_request_lines')
+        .select('expected_delivery_date')
+        .eq('id', sourcingTask.pr_line_id)
+        .single();
+      
+      deliveryDate = prLine?.expected_delivery_date || 
+        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    } else {
+      // 没有关联 PR 行时，设置默认交货日期为30天后
+      deliveryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
 
     const { data: po, error: poError } = await client
       .from('purchase_orders')
@@ -96,7 +106,7 @@ export async function POST(
         po_number: poNumber,
         supplier_id: quote.supplier_id,
         supplier_snapshot: quote.supplier_snapshot,
-        delivery_date: prLine?.expected_delivery_date || null,
+        delivery_date: deliveryDate,
         status: 'draft',
         created_by: actor,
       })
