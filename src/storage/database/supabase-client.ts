@@ -6,6 +6,7 @@ let envLoaded = false;
 interface SupabaseCredentials {
   url: string;
   anonKey: string;
+  serviceRoleKey?: string;
 }
 
 function loadEnv(): void {
@@ -72,6 +73,7 @@ function getSupabaseCredentials(): SupabaseCredentials {
 
   const url = process.env.COZE_SUPABASE_URL;
   const anonKey = process.env.COZE_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url) {
     throw new Error('COZE_SUPABASE_URL is not set');
@@ -80,7 +82,7 @@ function getSupabaseCredentials(): SupabaseCredentials {
     throw new Error('COZE_SUPABASE_ANON_KEY is not set');
   }
 
-  return { url, anonKey };
+  return { url, anonKey, serviceRoleKey };
 }
 
 function getSupabaseClient(token?: string): SupabaseClient {
@@ -112,4 +114,22 @@ function getSupabaseClient(token?: string): SupabaseClient {
   });
 }
 
-export { loadEnv, getSupabaseCredentials, getSupabaseClient };
+// 获取服务角色客户端（绕过 RLS）
+function getServiceRoleClient(): SupabaseClient {
+  const { url, serviceRoleKey } = getSupabaseCredentials();
+
+  if (!serviceRoleKey) {
+    // 如果没有 service role key，回退到使用 anon key
+    console.warn('COZE_SUPABASE_SERVICE_ROLE_KEY not configured, falling back to anon key');
+    return getSupabaseClient();
+  }
+
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
+
+export { loadEnv, getSupabaseCredentials, getSupabaseClient, getServiceRoleClient };

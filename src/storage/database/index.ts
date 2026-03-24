@@ -1,3 +1,3 @@
-import { getSupabaseClient } from './supabase-client';
+import { getSupabaseClient, getServiceRoleClient } from './supabase-client';
 
-export { getSupabaseClient };
+export { getSupabaseClient, getServiceRoleClient };

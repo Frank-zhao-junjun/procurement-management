@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database';
+import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, filterGoodsReceipts, type Role } from '@/lib/role-filter';
 import { getManagerWebhooks } from '@/storage/database/agent-binding';
@@ -56,7 +56,10 @@ export async function GET(request: NextRequest) {
 // POST /api/goods-receipts - 创建收货单
 export async function POST(request: NextRequest) {
   try {
+    // 使用用户身份的客户端进行操作记录
     const client = getSupabaseClient();
+    // 使用服务角色客户端查询基础数据（绕过 RLS）
+    const serviceClient = getServiceRoleClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
@@ -70,8 +73,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'quantity 必须为正数' }, { status: 400 });
     }
 
-    // 获取 PO 行信息 - 严格校验
-    const { data: poLine, error: poLineError } = await client
+    // 获取 PO 行信息 - 使用服务角色客户端绕过 RLS
+    const { data: poLine, error: poLineError } = await serviceClient
       .from('purchase_order_lines')
       .select('*')
       .eq('id', body.poLineId)
@@ -92,8 +95,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '采购订单行数量无效', detail: `quantity: ${poLine.quantity}` }, { status: 400 });
     }
 
-    // 获取 PO 头信息用于快照
-    const { data: poHeader } = await client
+    // 获取 PO 头信息用于快照 - 使用服务角色客户端
+    const { data: poHeader } = await serviceClient
       .from('purchase_orders')
       .select('*')
       .eq('id', body.poId || poLine.order_id)
