@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft } from 'lucide-react';
 import { getIdentityHeaders } from '@/lib/identity-store';
 
-export default function NewGoodsReceiptPage() {
+function NewGoodsReceiptContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const preselectedPoId = searchParams.get('poId');
@@ -292,5 +292,17 @@ export default function NewGoodsReceiptPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewGoodsReceiptPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex justify-center items-center min-h-[400px]">
+        <div className="text-gray-500">加载中...</div>
+      </div>
+    }>
+      <NewGoodsReceiptContent />
+    </Suspense>
   );
 }
