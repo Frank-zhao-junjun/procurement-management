@@ -138,7 +138,7 @@ async function matchFrameworkAgreements(client: any, requestId: number) {
 
         if (allMatches.length > 0) {
           // 按价格升序，取最低价
-          allMatches.sort((a, b) => parseFloat(a.unit_price) - parseFloat(b.unit_price));
+          allMatches.sort((a, b) => Number(a.unit_price) - Number(b.unit_price));
           const best = allMatches[0];
           
           // 标记为待确认（不是静默 confirmed）
@@ -169,7 +169,7 @@ async function matchFrameworkAgreements(client: any, requestId: number) {
                 fa_id: fa.id,
                 fa_number: fa.fa_number,
                 supplier_snapshot: fa.supplier_snapshot,
-                unit_price: parseFloat(fa.unit_price),
+                unit_price: Number(fa.unit_price),
               })),
               recommended_fa_id: best.id,
               match_type: idMatches.length > 0 ? 'material_id' : 'text',

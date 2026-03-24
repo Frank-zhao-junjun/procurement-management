@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const client = getSupabaseClient();
     const searchParams = request.nextUrl.searchParams;
     const text = searchParams.get('text')?.trim();
-    const threshold = parseFloat(searchParams.get('threshold') || '0.3');
+    const threshold = Number(searchParams.get('threshold') || '0.3');
     const limit = parseInt(searchParams.get('limit') || '5');
 
     if (!text) {

@@ -201,7 +201,7 @@ async function createPOFromFAMatch(
         material_snapshot: fa.material_snapshot,
         quantity: prLine.quantity,
         unit_price: fa.unit_price,
-        total_price: parseFloat(fa.unit_price) * parseFloat(prLine.quantity),
+        total_price: Number(fa.unit_price) * Number(prLine.quantity),
         received_qty: 0,
         pending_qty: prLine.quantity,
         status: 'ordered',

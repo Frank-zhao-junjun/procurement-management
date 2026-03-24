@@ -91,8 +91,8 @@ export async function POST(request: NextRequest) {
 
     const quoteNumber = await numberGenerators.quote();
 
-    const quantity = parseFloat(String(parsed.data.quantity || '0'));
-    const unitPrice = parseFloat(String(parsed.data.unitPrice || '0'));
+    const quantity = Number(parsed.data.quantity || '0');
+    const unitPrice = Number(parsed.data.unitPrice || '0');
     const totalPrice = quantity * unitPrice;
 
     let supplierSnapshot = parsed.data.supplierSnapshot || '';

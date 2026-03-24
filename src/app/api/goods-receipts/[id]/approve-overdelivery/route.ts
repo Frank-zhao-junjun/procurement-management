@@ -60,7 +60,7 @@ export async function POST(
     }
 
     // 校验 PO 行数据完整性
-    const orderQty = parseFloat(poLine.quantity);
+    const orderQty = Number(poLine.quantity);
     if (isNaN(orderQty) || orderQty <= 0) {
       return NextResponse.json({ 
         error: '采购订单行数量无效',
@@ -68,7 +68,7 @@ export async function POST(
       }, { status: 400 });
     }
 
-    const grQty = parseFloat(gr.quantity);
+    const grQty = Number(gr.quantity);
     if (isNaN(grQty) || grQty <= 0) {
       return NextResponse.json({ 
         error: '收货数量无效',
@@ -95,7 +95,7 @@ export async function POST(
       }
 
       // 更新 PO 行：审批通过后把本次收货量加入已收货
-      const oldReceived = parseFloat(poLine.received_qty || '0');
+      const oldReceived = Number(poLine.received_qty || '0');
       const newReceivedQty = oldReceived + grQty;
       const pendingQty = Math.max(0, orderQty - newReceivedQty);
       const lineStatus = pendingQty === 0 ? 'received' : 'partial_received';
