@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'poLineId 为必填参数' }, { status: 400 });
     }
 
-    const grQuantity = parseFloat(body.quantity);
+    const grQuantity = Number(body.quantity);
     if (isNaN(grQuantity) || grQuantity <= 0) {
       return NextResponse.json({ error: 'quantity 必须为正数' }, { status: 400 });
     }
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 校验 PO 行数据完整性
-    const orderQty = parseFloat(poLine.quantity);
+    const orderQty = Number(poLine.quantity);
     if (isNaN(orderQty) || orderQty <= 0) {
       return NextResponse.json({ error: '采购订单行数量无效', detail: `quantity: ${poLine.quantity}` }, { status: 400 });
     }
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     const grNumber = await generateGRNumber(grType);
 
     // 计算收货后的净收货数量
-    const currentReceived = parseFloat(poLine.received_qty || '0');
+    const currentReceived = Number(poLine.received_qty || '0');
     
     let newReceivedQty: number;
     if (grType === 'out') {
@@ -146,9 +146,9 @@ export async function POST(request: NextRequest) {
     
     const poLineSnapshot = JSON.stringify({
       material_snapshot: poLine.material_snapshot,
-      quantity: poLine.quantity,
-      unit_price: poLine.unit_price,
-      received_qty: poLine.received_qty,
+      quantity: Number(poLine.quantity),
+      unit_price: Number(poLine.unit_price),
+      received_qty: Number(poLine.received_qty),
     });
 
     // 如果超收且当前角色不是 manager，需要审批
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
           po_id: body.poId || poLine.order_id,
           po_line_id: body.poLineId,
           gr_type: grType,
-          quantity: body.quantity,
+          quantity: Number(body.quantity),
           receipt_date: receiptDate,
           receipt_time: receiptTime,
           receiver: actor,
@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
         po_id: poId || poLine.order_id,
         po_line_id: poLineId,
         gr_type: grType,
-        quantity: body.quantity,
+        quantity: Number(body.quantity),
         receipt_date: receiptDate,
         receipt_time: receiptTime,
         receiver: actor,
