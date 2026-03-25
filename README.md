@@ -186,7 +186,11 @@ psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
 
 ## 最近更新
 
-### v1.3.0 (2024-03-25)
+### v1.4.0 (2024-03-25)
+
+**API 状态更新：**
+- ✅ **报价单 API** - 真实可用
+- ✅ **收货单 API** - 真实可用
 
 **新增功能：**
 - ✅ **自动创建采购订单**：采购申请审批通过后，当物料 ID 与框架协议精确匹配时，自动生成采购订单
@@ -201,7 +205,7 @@ psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
 **数据库变更：**
 - 添加 `purchase_orders.pr_id` 字段（关联采购申请）
 
-### v1.2.0 (2024-03-24)
+### v1.3.0 (2024-03-25)
 
 **新增功能：**
 - ✅ 新增 `POST /api/purchase-orders/[id]/lines` - 批量创建订单行
