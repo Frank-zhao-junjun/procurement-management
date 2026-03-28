@@ -94,6 +94,54 @@ POST /api/purchase-requests
   - `manager` - 审批人/经理
   - `system` - 系统操作（审计日志专用）
 - **Webhook 通知**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
+- **A2A 通知**：支持 Agent 间主动通知，通过 A2A Scheduler 实现
+
+## A2A 通知系统
+
+系统集成了 A2A Scheduler，支持 Agent 间的主动通知功能。
+
+### 通知触发场景
+
+| 业务场景 | 通知目标 | 说明 |
+|----------|----------|------|
+| PR 提交 | manager-agent | 采购申请提交后自动通知 |
+| PO 创建 | logistics-agent | 采购订单创建后自动通知 |
+| 超收待审批 | manager-agent | 超收超过 5% 需审批时通知 |
+| 框架协议待审批 | manager-agent | 框架协议提交审批时通知 |
+
+### 直接发送通知
+
+```bash
+# 向指定 Agent 发送通知
+POST /api/a2a/notify
+-H "Content-Type: application/json"
+{"to": "manager-agent", "message": "您有一笔采购申请待审批", "priority": "high"}
+
+# 广播消息给所有 Agent
+PUT /api/a2a/notify
+-H "Content-Type: application/json"
+{"message": "系统将于今晚进行维护", "role": "manager"}
+```
+
+### 查询已注册 Agent
+
+```bash
+# 查看 A2A 连接状态
+GET /api/a2a
+
+# 返回示例
+{
+  "data": [
+    {
+      "name": "manager-agent",
+      "endpoint": "http://localhost:8000/agents/manager-agent",
+      "skills": ["pr_approval", "contract_approval"],
+      "status": "connected"
+    }
+  ],
+  "available": true
+}
+```
 
 ## Webhook 事件通知
 
