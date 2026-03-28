@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
+import { getRequesterWebhooks } from '@/storage/database/agent-binding';
 
 /**
  * POST /api/quotes/[id]/award - 授标（标记为中标）
@@ -187,6 +188,18 @@ export async function POST(
       },
     ]);
 
+    // 8. 通知 Requester Agent（PO 已生成）
+    notifyRequesters({
+      event: 'po_created',
+      poId: po.id,
+      poNumber: poNumber,
+      prId: sourcingTask.pr_id,
+      supplierName: quote.supplier_snapshot || '未知供应商',
+      createdAt: new Date().toISOString(),
+    }).catch(err => {
+      console.error('Failed to notify requesters:', err);
+    });
+
     return NextResponse.json({
       success: true,
       message: '授标成功，已自动创建采购订单',
@@ -204,4 +217,51 @@ export async function POST(
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+}
+
+// 通知所有 Requester Agent（当 PO 生成时通知申请人）
+async function notifyRequesters(payload: {
+  event: string;
+  poId: number;
+  poNumber: string;
+  prId?: number;
+  prNumber?: string;
+  supplierName: string;
+  createdAt: string;
+}): Promise<void> {
+  const webhooks = await getRequesterWebhooks();
+
+  if (webhooks.length === 0) {
+    console.log('No requester webhooks configured');
+    return;
+  }
+
+  const results = await Promise.allSettled(
+    webhooks.map(async (webhookUrl) => {
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'ProcurementSystem-Webhook/1.0',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        return { url: webhookUrl, success: true };
+      } catch (err) {
+        return { url: webhookUrl, success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+      }
+    })
+  );
+
+  const succeeded = results.filter(r => r.status === 'fulfilled' && (r as any).value.success).length;
+  const failed = results.filter(r => r.status === 'rejected' || !(r as any).value.success).length;
+
+  console.log(`Requester webhook notifications: ${succeeded} succeeded, ${failed} failed`);
 }

@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, RefreshCw, Send, GitBranch, AlertCircle, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Send, GitBranch, AlertCircle, CheckCircle, Bell } from 'lucide-react';
 
 // ========== 类型定义 ==========
 
@@ -129,6 +129,34 @@ function AgentListTab() {
       fetchAgents();
     } catch (err: any) {
       alert(err.message || '删除失败');
+    }
+  };
+
+  const testNotification = async (agent: Agent) => {
+    if (!agent.webhook_url) return;
+    
+    const testPayload = {
+      event: 'test_notification',
+      message: '这是一条测试通知，用于验证 Webhook 配置是否正确',
+      agent: agent.agent_id,
+      role: agent.role,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const response = await fetch(agent.webhook_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(testPayload),
+      });
+      
+      if (response.ok) {
+        alert('测试通知发送成功！');
+      } else {
+        alert(`测试通知发送失败: HTTP ${response.status}`);
+      }
+    } catch (err: any) {
+      alert(`测试通知发送失败: ${err.message}`);
     }
   };
 
@@ -247,6 +275,17 @@ function AgentListTab() {
                     {new Date(agent.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
                   </TableCell>
                   <TableCell className="text-right">
+                    {agent.webhook_url && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => testNotification(agent)}
+                        className="mr-2"
+                        title="测试通知"
+                      >
+                        <Bell className="w-4 h-4" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={() => openEditDialog(agent)} className="mr-2">编辑</Button>
                     <Button variant="ghost" size="sm" onClick={() => handleDelete(agent)} className="text-red-600 hover:text-red-700">
                       <Trash2 className="w-4 h-4" />

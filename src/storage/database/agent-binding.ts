@@ -119,6 +119,22 @@ export async function getManagerWebhooks(): Promise<string[]> {
     .map(b => b.webhook_url as string);
 }
 
+// 获取所有有 Webhook URL 的 Requester Agent
+export async function getRequesterWebhooks(): Promise<string[]> {
+  const bindings = await getByRole('requester');
+  return bindings
+    .filter(b => b.webhook_url)
+    .map(b => b.webhook_url as string);
+}
+
+// 获取所有有 Webhook URL 的 Buyer Agent
+export async function getBuyerWebhooks(): Promise<string[]> {
+  const bindings = await getByRole('buyer');
+  return bindings
+    .filter(b => b.webhook_url)
+    .map(b => b.webhook_url as string);
+}
+
 // 获取所有活跃绑定
 export async function getAllActive(): Promise<AgentBinding[]> {
   const client = getSupabaseClient();
