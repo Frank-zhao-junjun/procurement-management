@@ -112,7 +112,7 @@ export default function SourcingTasksPage() {
                   <TableRow>
                     <TableHead>任务号</TableHead>
                     <TableHead>关联PR</TableHead>
-                    <TableHead>物料</TableHead>
+                    <TableHead>物料名称</TableHead>
                     <TableHead>目标供应商</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>截止日期</TableHead>

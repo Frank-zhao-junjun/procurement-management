@@ -173,7 +173,7 @@ export default function PurchaseOrdersPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>订单号</TableHead>
-                    <TableHead>供应商</TableHead>
+                    <TableHead>供应商名称</TableHead>
                     <TableHead>到货日期</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>行数</TableHead>
@@ -185,7 +185,21 @@ export default function PurchaseOrdersPage() {
                   {orders.map((order) => (
                     <TableRow key={order.id}>
                       <TableCell className="font-medium">{order.po_number}</TableCell>
-                      <TableCell>{order.supplier_snapshot || '-'}</TableCell>
+                      <TableCell>
+                        {(() => {
+                          const snapshot = order.supplier_snapshot;
+                          if (!snapshot) return '-';
+                          if (typeof snapshot === 'string') {
+                            try {
+                              const parsed = JSON.parse(snapshot);
+                              return parsed.name || parsed.supplier_name || snapshot;
+                            } catch {
+                              return snapshot;
+                            }
+                          }
+                          return snapshot.name || snapshot.supplier_name || '-';
+                        })()}
+                      </TableCell>
                       <TableCell>
                         {order.delivery_date || '-'}
                       </TableCell>
@@ -194,7 +208,11 @@ export default function PurchaseOrdersPage() {
                           {statusMap[order.status]?.label || order.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{order.lines_count || order.purchase_order_lines?.length || 0}</TableCell>
+                      <TableCell>
+                        {(order.lines_count || 0) > 0 ? order.lines_count : (
+                          <span className="text-red-500 font-medium">⚠️ 无行项目</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {order.created_at ? new Date(order.created_at).toLocaleString('zh-CN') : '-'}
                       </TableCell>

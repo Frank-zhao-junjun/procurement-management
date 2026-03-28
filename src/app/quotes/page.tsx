@@ -258,7 +258,7 @@ export default function QuotesPage() {
                     <TableHead>报价单号</TableHead>
                     <TableHead>寻源任务</TableHead>
                     <TableHead>供应商</TableHead>
-                    <TableHead>物料</TableHead>
+                    <TableHead>物料名称</TableHead>
                     <TableHead>单价</TableHead>
                     <TableHead>数量</TableHead>
                     <TableHead>总价</TableHead>

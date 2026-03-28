@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
     if (error.name === 'TimeoutError' || error.code === 'ECONNREFUSED') {
       return NextResponse.json({
         error: 'A2A Scheduler 未连接',
-        hint: '请确保 A2A Scheduler 服务正在运行 (http://localhost:8000)',
         available: false,
       }, { status: 503 });
     }
@@ -63,7 +62,6 @@ export async function POST(request: NextRequest) {
     if (error.name === 'TimeoutError' || error.code === 'ECONNREFUSED') {
       return NextResponse.json({
         error: 'A2A Scheduler 未连接',
-        hint: '请确保 A2A Scheduler 服务正在运行',
         available: false,
       }, { status: 503 });
     }

@@ -367,10 +367,10 @@ function TaskSendTab() {
       <CardContent>
         {!schedulerAvailable ? (
           <div className="text-center py-12">
-            <AlertCircle className="w-12 h-12 mx-auto text-yellow-500 mb-4" />
-            <h3 className="text-lg font-medium mb-2">A2A Scheduler 未连接</h3>
-            <p className="text-muted-foreground mb-4">请确保 A2A Scheduler 服务正在运行</p>
-            <code className="text-sm bg-muted px-2 py-1 rounded">python -m scheduler.main</code>
+            <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-2 text-muted-foreground">A2A Scheduler 未连接</h3>
+            <p className="text-muted-foreground mb-2">如需使用任务发送和工作流编排功能</p>
+            <p className="text-sm text-muted-foreground">请联系管理员启动 A2A Scheduler 服务</p>
           </div>
         ) : loading ? (
           <div className="text-center py-8 text-muted-foreground">加载中...</div>
@@ -564,10 +564,10 @@ function WorkflowTab() {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <AlertCircle className="w-12 h-12 mx-auto text-yellow-500 mb-4" />
-          <h3 className="text-lg font-medium mb-2">A2A Scheduler 未连接</h3>
-          <p className="text-muted-foreground mb-4">请确保 A2A Scheduler 服务正在运行</p>
-          <code className="text-sm bg-muted px-2 py-1 rounded">python -m scheduler.main</code>
+          <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium mb-2 text-muted-foreground">A2A Scheduler 未连接</h3>
+          <p className="text-muted-foreground mb-2">如需使用工作流编排功能</p>
+          <p className="text-sm text-muted-foreground">请联系管理员启动 A2A Scheduler 服务</p>
         </CardContent>
       </Card>
     );

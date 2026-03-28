@@ -93,7 +93,7 @@ export default function MaterialsPage() {
                   <TableRow>
                     <TableHead>ID</TableHead>
                     <TableHead>编码</TableHead>
-                    <TableHead>名称</TableHead>
+                    <TableHead>物料名称</TableHead>
                     <TableHead>单位</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>创建时间</TableHead>

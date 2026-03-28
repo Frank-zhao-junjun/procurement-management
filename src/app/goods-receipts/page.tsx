@@ -245,7 +245,7 @@ export default function GoodsReceiptsPage() {
                     <TableHead>收货单号</TableHead>
                     <TableHead>类型</TableHead>
                     <TableHead>关联订单</TableHead>
-                    <TableHead>物料</TableHead>
+                    <TableHead>物料名称</TableHead>
                     <TableHead>数量</TableHead>
                     <TableHead>收货日期</TableHead>
                     <TableHead>收货人</TableHead>
