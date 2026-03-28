@@ -242,4 +242,15 @@ export const a2aWorkflowApi = {
     api.post<any>('/a2a/workflow/run', { steps, context }),
 };
 
+// A2A 通知 API
+export const a2aNotifyApi = {
+  // 向指定 Agent 发送通知
+  send: (to: string, message: string, options?: { from?: string; priority?: string }) =>
+    api.post<any>('/a2a/notify', { to, message, ...options }),
+
+  // 广播消息给所有 Agent
+  broadcast: (message: string, options?: { from?: string; role?: string }) =>
+    api.put<any>('/a2a/notify', { message, ...options }),
+};
+
 export type { RequestOptions };

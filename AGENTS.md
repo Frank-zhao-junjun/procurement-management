@@ -11,6 +11,59 @@
 - **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
 - **角色固定**：`requester` / `buyer` / `manager`
 - **Webhook 可选**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
+- **A2A 通知**：系统支持通过 A2A Scheduler 向其他 Agent 发送主动通知
+
+## A2A 通知系统
+
+系统集成了 A2A Scheduler，支持 Agent 间的主动通知功能。
+
+### 通知触发场景
+
+| 业务场景 | 通知目标 | 通知方式 |
+|----------|----------|----------|
+| PR 提交 | manager-agent | A2A + Webhook |
+| PO 创建 | logistics-agent | A2A |
+| 超收待审批 | manager-agent | A2A + Webhook |
+| 框架协议待审批 | manager-agent | A2A |
+
+### 直接发送通知
+
+```bash
+# 向指定 Agent 发送通知
+POST /api/a2a/notify
+{
+  "to": "manager-agent",
+  "message": "您有一笔采购申请待审批",
+  "priority": "high"
+}
+
+# 广播消息给所有 Agent
+PUT /api/a2a/notify
+{
+  "message": "系统将于今晚进行维护",
+  "role": "manager"  // 可选，筛选特定角色
+}
+```
+
+### 查询已注册 Agent
+
+```bash
+# 查看 A2A 连接状态
+GET /api/a2a
+
+# 返回示例
+{
+  "data": [
+    {
+      "name": "manager-agent",
+      "endpoint": "http://localhost:8000/agents/manager-agent",
+      "skills": ["pr_approval", "contract_approval", "overdelivery_approval"],
+      "status": "connected"
+    }
+  ],
+  "available": true
+}
+```
 
 ## 快速开始
 
@@ -272,6 +325,32 @@ POST /api/purchase-requests/confirm-materials
 
 ### 2. 提交与审批 PR
 
+```bash
+# 提交采购申请（触发通知给 Manager Agent）
+POST /api/purchase-requests/{id}/submit
+
+# 返回示例
+{
+  "data": {
+    "id": 1,
+    "pr_number": "PR-20250401-01",
+    "status": "pending"
+  },
+  "notification": {
+    "success": true,
+    "results": [{"agent": "manager-agent", "success": true}]
+  }
+}
+
+# Manager 审批通过
+POST /api/purchase-request-lines/{id}/approve
+{"approved": true}
+
+# Manager 审批拒绝
+POST /api/purchase-request-lines/{id}/approve
+{"approved": false, "reason": "超出预算"}
+```
+
 ### 3. 框架协议匹配
 
 审批通过后，系统自动匹配框架协议：
@@ -289,6 +368,22 @@ PUT /api/purchase-request-lines/{id}/confirm-fa
 # 拒绝并创建寻源任务
 PUT /api/purchase-request-lines/{id}/confirm-fa
 {"confirmed": false}
+
+# 提交框架协议审批（触发通知给 Manager Agent）
+POST /api/contracts/{id}/submit
+
+# 返回示例
+{
+  "data": {
+    "id": 1,
+    "title": "办公用品采购协议",
+    "status": "pending"
+  },
+  "notification": {
+    "success": true,
+    "results": [{"agent": "manager-agent", "success": true}]
+  }
+}
 ```
 
 ### 4. 寻源与报价

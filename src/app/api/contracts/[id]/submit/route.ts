@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
-import { onPRSubmitted } from '@/lib/agent-notify';
+import { onContractPending } from '@/lib/agent-notify';
 
 /**
- * POST /api/purchase-requests/[id]/submit - 提交采购申请
- * 将采购申请从 draft 状态提交到 pending 状态
+ * POST /api/contracts/[id]/submit - 提交框架协议审批
+ * 将框架协议从 draft 状态提交到 pending 状态
  */
 export async function POST(
   request: NextRequest,
@@ -18,7 +18,7 @@ export async function POST(
 
     // 检查当前状态
     const { data: existing, error: findError } = await client
-      .from('purchase_requests')
+      .from('contracts')
       .select('*')
       .eq('id', parseInt(id, 10))
       .single();
@@ -28,32 +28,19 @@ export async function POST(
     }
 
     if (!existing) {
-      return NextResponse.json({ error: 'Purchase request not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Contract not found' }, { status: 404 });
     }
 
     if (existing.status !== 'draft') {
       return NextResponse.json(
-        { error: 'Only draft requests can be submitted' },
-        { status: 400 }
-      );
-    }
-
-    // 检查是否有行项目
-    const { data: lines } = await client
-      .from('purchase_request_lines')
-      .select('*')
-      .eq('request_id', parseInt(id, 10));
-
-    if (!lines || lines.length === 0) {
-      return NextResponse.json(
-        { error: 'Cannot submit request without items' },
+        { error: 'Only draft contracts can be submitted' },
         { status: 400 }
       );
     }
 
     // 更新状态为 pending
     const { data, error } = await client
-      .from('purchase_requests')
+      .from('contracts')
       .update({ 
         status: 'pending',
         submitted_at: new Date().toISOString(),
@@ -69,7 +56,7 @@ export async function POST(
 
     // 记录审计日志
     await client.from('audit_logs').insert({
-      entity_type: 'purchase_request',
+      entity_type: 'contract',
       entity_id: parseInt(id, 10),
       action: 'submit',
       actor,
@@ -80,13 +67,13 @@ export async function POST(
     // 通知 Manager Agent
     let notifyResult = null;
     try {
-      notifyResult = await onPRSubmitted(parseInt(id, 10));
+      notifyResult = await onContractPending(parseInt(id, 10));
     } catch (notifyError) {
       console.error('Failed to notify Manager Agent:', notifyError);
     }
 
     return NextResponse.json({ 
-      data: { ...data, purchase_request_lines: lines },
+      data,
       notification: notifyResult,
     });
   } catch (error: any) {

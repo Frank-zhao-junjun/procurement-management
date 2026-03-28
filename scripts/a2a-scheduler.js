@@ -6,6 +6,7 @@
  * - 任务发送
  * - 链式执行
  * - 自定义工作流
+ * - Agent 间通知
  */
 
 const http = require('http');
@@ -17,6 +18,9 @@ const agents = new Map();
 // 存储任务历史
 const tasks = new Map();
 let taskIdCounter = 1;
+
+// 存储通知处理器（每个 Agent 可以注册一个通知处理函数）
+const notificationHandlers = new Map();
 
 const PORT = process.env.A2A_SCHEDULER_PORT || 8000;
 
@@ -154,6 +158,113 @@ async function handleRequest(req, res) {
         taskId,
         status: 'completed',
         result: task.result,
+      });
+      return;
+    }
+
+    // Agent 间直接通知
+    if (pathname === '/notify' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const { from, to, message, priority } = body;
+
+      if (!to || !message) {
+        sendJson(res, 400, { error: 'to and message are required' });
+        return;
+      }
+
+      const targetAgent = agents.get(to);
+      if (!targetAgent) {
+        sendJson(res, 404, { error: `Agent ${to} not found` });
+        return;
+      }
+
+      const notification = {
+        id: `notif_${taskIdCounter++}`,
+        from: from || 'system',
+        to,
+        message,
+        priority: priority || 'normal',
+        status: 'delivered',
+        timestamp: new Date().toISOString(),
+      };
+
+      // 如果 Agent 注册了通知处理器，调用它
+      const handler = notificationHandlers.get(to);
+      if (handler) {
+        try {
+          notification.status = 'handled';
+          notification.handlerResponse = handler(notification);
+        } catch (e) {
+          notification.status = 'handler_error';
+          notification.handlerError = e.message;
+        }
+      }
+
+      tasks.set(notification.id, notification);
+      console.log(`[A2A] Notification: ${from || 'system'} -> ${to}: ${message}`);
+
+      sendJson(res, 200, {
+        success: true,
+        notification,
+      });
+      return;
+    }
+
+    // Agent 注册通知处理器
+    if (pathname === '/handlers/notification' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const { agent, handler } = body;
+
+      if (!agent) {
+        sendJson(res, 400, { error: 'agent is required' });
+        return;
+      }
+
+      if (!agents.has(agent)) {
+        sendJson(res, 404, { error: `Agent ${agent} not found` });
+        return;
+      }
+
+      // handler 可以是一个函数描述或内联代码
+      notificationHandlers.set(agent, handler || (() => ({ processed: true })));
+      console.log(`[A2A] Notification handler registered for ${agent}`);
+
+      sendJson(res, 200, { success: true });
+      return;
+    }
+
+    // 广播消息给所有 Agent
+    if (pathname === '/broadcast' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const { from, message, role, priority } = body;
+
+      if (!message) {
+        sendJson(res, 400, { error: 'message is required' });
+        return;
+      }
+
+      const allAgents = Array.from(agents.values());
+      const targetAgents = role 
+        ? allAgents.filter(a => a.name.includes(role))
+        : allAgents;
+
+      const notifications = targetAgents.map(agent => ({
+        id: `notif_${taskIdCounter++}`,
+        from: from || 'system',
+        to: agent.name,
+        message,
+        priority: priority || 'normal',
+        status: 'delivered',
+        timestamp: new Date().toISOString(),
+      }));
+
+      notifications.forEach(n => tasks.set(n.id, n));
+      console.log(`[A2A] Broadcast: ${from || 'system'} -> ${targetAgents.length} agents: ${message}`);
+
+      sendJson(res, 200, {
+        success: true,
+        broadcasted: notifications.length,
+        notifications,
       });
       return;
     }

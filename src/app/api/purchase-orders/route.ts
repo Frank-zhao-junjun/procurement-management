@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { onPOCreated } from '@/lib/agent-notify';
 
 // GET /api/purchase-orders - 获取采购订单列表
 export async function GET(request: NextRequest) {
@@ -194,12 +195,21 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('order_id', po.id);
 
+    // 通知相关 Agent（异步，不阻塞返回）
+    let notifyResult = null;
+    try {
+      notifyResult = await onPOCreated(po.id);
+    } catch (notifyError) {
+      console.error('Failed to notify Agent:', notifyError);
+    }
+
     return NextResponse.json({ 
       success: true,
       data: {
         ...fullPo,
         lines: poLines || [],
-      }
+      },
+      notification: notifyResult,
     }, { status: 201 });
   } catch (error: any) {
     console.error('PO创建异常:', error);

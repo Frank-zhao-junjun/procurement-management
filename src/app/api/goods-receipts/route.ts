@@ -4,6 +4,7 @@ import { generateGRNumber } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
 import { getManagerWebhooks } from '@/storage/database/agent-binding';
 import { getBeijingDateString, getBeijingTimeString, getBeijingISOString } from '@/lib/datetime';
+import { onOverReceiptPending } from '@/lib/agent-notify';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
@@ -211,7 +212,12 @@ export async function POST(request: NextRequest) {
         requestedBy: actor,
         requestedAt: getBeijingISOString(),
       }).catch(err => {
-        console.error('Failed to notify managers:', err);
+        console.error('Failed to notify managers via webhook:', err);
+      });
+
+      // 同时通过 Agent 通知 Manager
+      onOverReceiptPending(gr.id, grQuantity, body.notes || '').catch(err => {
+        console.error('Failed to notify managers via Agent:', err);
       });
 
       return NextResponse.json({
