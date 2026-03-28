@@ -186,6 +186,21 @@ psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
 
 ## 最近更新
 
+### v1.5.0 (2024-03-28)
+
+**新增功能：**
+- ✅ **Agent 管理页面** - Web UI 管理已注册的 Agent
+  - 查看 Agent 列表
+  - 注册新 Agent（需 Manager 权限）
+  - 编辑 Agent 角色和 Webhook
+  - 删除 Agent（需 Manager 权限）
+
+**API 新增：**
+- `GET /api/agent-bindings` - 获取 Agent 列表
+- `GET /api/agent-bindings/[id]` - 获取单个 Agent
+- `PUT /api/agent-bindings/[id]` - 更新 Agent（需 Manager 权限）
+- `DELETE /api/agent-bindings/[id]` - 删除 Agent（需 Manager 权限）
+
 ### v1.4.0 (2024-03-25)
 
 **API 状态更新：**

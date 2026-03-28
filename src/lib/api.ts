@@ -194,12 +194,21 @@ export const auditLogsApi = {
 };
 
 // Agent 绑定 API
-export const agentBindingsApi = {
-  list: () =>
-    api.get<{ data: any[] }>('/agent-bindings'),
+export const agentsApi = {
+  list: (params?: { page?: number; pageSize?: number; role?: string }) =>
+    api.get<{ data: any[]; total: number }>('/agent-bindings', params),
+
+  get: (id: number) =>
+    api.get<{ data: any }>(`/agent-bindings/${id}`),
 
   create: (data: { agentId: string; role: string; webhookUrl?: string }) =>
-    api.post<{ success: boolean; bindingId: number }>('/agent-bindings', data),
+    api.post<{ data: any }>('/agent-bindings', data),
+
+  update: (id: number, data: { role?: string; webhookUrl?: string }) =>
+    api.put<{ data: any }>(`/agent-bindings/${id}`, data),
+
+  delete: (id: number) =>
+    api.delete(`/agent-bindings/${id}`),
 };
 
 export type { RequestOptions };

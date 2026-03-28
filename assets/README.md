@@ -1,174 +1,126 @@
-# 采购管理系统 (Procurement Management System)
+# A2A Scheduler 🦞
 
-面向 Agent 使用的采购管理系统，支持采购申请、寻源、报价、框架协议、采购订单、收货等全流程管理。
-系统采用 **Agent-first 身份模型**：`agent_id + role`，简洁直接。
-
-## 功能特性
-
-- **采购申请 (PR)**: 创建、提交、审批
-- **寻源任务 (SC)**: 供应商寻源管理
-- **报价单 (Q)**: 单一中标报价管理
-- **框架协议 (FA)**: 价格协议管理，支持自动匹配
-- **采购订单 (PO)**: 订单创建、发送、状态跟踪
-- **收货单 (GR/RT)**: 收货与退货管理，含超收审批
-- **审计日志**: 完整操作追溯
-
-## 技术栈
-
-- **框架**: Next.js 16 (App Router)
-- **UI**: React 19 + shadcn/ui + Tailwind CSS 4
-- **数据库**: PostgreSQL (Supabase)
-- **语言**: TypeScript 5
-- **包管理**: pnpm
+轻量级 A2A (Agent-to-Agent) 调度台，支持跨平台 Agent 注册、任务分发和工作流编排。
 
 ## 快速开始
 
-### 安装依赖
+### 1. 安装依赖
 
 ```bash
-pnpm install
+cd a2a-scheduler
+pip install -r requirements.txt
 ```
 
-### 开发环境
+### 2. 启动服务
+
+需要开 **3 个终端窗口**：
+
+**终端 1 - 启动 Scheduler (调度台后端):**
+```bash
+python -m scheduler.main
+# 服务运行在 http://localhost:8000
+```
+
+**终端 2 - 启动示例 Agent A:**
+```bash
+python agents/agent_a.py
+# 服务运行在 http://localhost:8001
+```
+
+**终端 3 - 启动示例 Agent B:**
+```bash
+python agents/agent_b.py
+# 服务运行在 http://localhost:8002
+```
+
+### 3. 启动 Web UI
 
 ```bash
-pnpm dev
+streamlit run webui.py
+# 自动打开浏览器，访问 http://localhost:8501
 ```
 
-访问 [http://localhost:5000](http://localhost:5000)
+## 使用 Web UI
 
-### 生产构建
+### 1. 注册 Agent
+- 点击左侧菜单 **"➕ 注册 Agent"**
+- 填写 Agent 信息：
+  - 名称: `agent-a`
+  - Endpoint: `http://localhost:8001`
+  - 技能: `translate, summarize, uppercase`
+- 同样方式注册 `agent-b`
 
-```bash
-pnpm build
-pnpm start
-```
+### 2. 发送单任务
+- 点击 **"📤 发送任务"**
+- 选择 Agent 和技能
+- 输入 JSON 参数，点击发送
 
-## API 调用示例
+### 3. 工作流编排
+- 点击 **"🔗 工作流编排"**
+- **链式执行**: 选择多个 Agent 按顺序执行
+- **自定义工作流**: 灵活定义每一步的输入输出映射
 
-Agent 可通过 HTTP API 调用系统：
-
-```bash
-# 注册 Agent（首次使用前）
-curl -X POST http://localhost:5000/api/agent-bindings \
-  -H "Content-Type: application/json" \
-  -d '{"agentId":"coze_bot_001","role":"requester"}'
-
-# 注册 Manager Agent（带 webhook，接收待审批通知）
-curl -X POST http://localhost:5000/api/agent-bindings \
-  -H "Content-Type: application/json" \
-  -d '{"agentId":"coze_manager_001","role":"manager","webhookUrl":"https://example.com/webhook"}'
-
-# 创建采购申请
-curl -X POST http://localhost:5000/api/purchase-requests \
-  -H "Content-Type: application/json" \
-  -H "X-Actor: coze_bot_001" \
-  -d '{"reason":"产线急需M3螺栓500个","lines":[{"requirementText":"M3螺栓","quantity":500}]}'
-
-# 提交采购申请
-curl -X POST http://localhost:5000/api/purchase-requests/{id}/submit \
-  -H "X-Actor: coze_bot_001"
-
-# 审批采购申请
-curl -X POST http://localhost:5000/api/purchase-requests/{id}/approve \
-  -H "Content-Type: application/json" \
-  -H "X-Actor: coze_manager_001" \
-  -d '{"approved": true}'
-```
-
-## Agent-first 模型
-
-```
-一个 Agent ↔ 一个角色
-```
-
-- **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
-- **角色固定**：`requester` / `buyer` / `manager`
-- **Webhook 通知**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
-
-## 角色权限
-
-| 角色 | 说明 |
-|------|------|
-| `requester` | 需求人，可创建采购申请、收货 |
-| `buyer` | 采购人，可创建 PO、报价、寻源任务 |
-| `manager` | 审批人，可审批 PR 和超收收货 |
-
-## Web 端身份切换（调试/演示）
-
-- Web 端内置身份选择器，可在页面右上角切换 `requester/buyer/manager`
-- 可自定义 Actor（例如 `coze_bot_001`）模拟不同 Agent
-- 前端请求会自动附带 `X-Actor` 和 `X-Role` 请求头
-
-## Webhook 事件通知
-
-Manager Agent 可通过 `webhookUrl` 接收系统事件通知：
-
-- `pr_submitted`: 采购申请提交后触发
-- `overdelivery_pending`: 超收待审批时触发
-
-说明：
-- 仅会通知角色为 `manager` 且已配置 `webhook_url` 的 Agent
-- 通知以 HTTP POST 发送，超时 10 秒，失败不阻塞主业务流程
-
-## 已知兼容性说明（PostgREST schema cache）
-
-为避免 Supabase/PostgREST 关系缓存异常导致的查询失败，
-以下列表接口已改为主表查询（`select('*')`），通过快照字段存储关联数据：
-
-- `/api/framework-agreements`
-- `/api/sourcing-tasks`
-- `/api/quotes`
-- `/api/goods-receipts`
+### 4. 查看历史
+- 所有执行记录保存在 **"📊 执行历史"** 中
 
 ## 项目结构
 
 ```
-src/
-├── app/
-│   ├── api/                  # API 路由
-│   │   ├── materials/
-│   │   ├── suppliers/
-│   │   ├── purchase-requests/
-│   │   ├── purchase-orders/
-│   │   ├── goods-receipts/
-│   │   ├── framework-agreements/
-│   │   ├── sourcing-tasks/
-│   │   ├── quotes/
-│   │   └── audit-logs/
-│   └── ...                   # 页面路由
-├── components/
-│   └── ui/                   # shadcn/ui 组件
-├── lib/
-│   ├── api.ts                # API 客户端
-│   └── role-filter.ts        # 角色权限过滤
-└── storage/
-    └── database/
-        ├── schema.ts         # 数据库 Schema
-        ├── number-generator.ts    # 单据编号生成
-        ├── fa-matcher.ts         # FA 智能匹配
-        ├── po-sender.ts          # PO 发送与重试
-        └── agent-binding.ts      # Agent 注册与 webhook 获取
+a2a-scheduler/
+├── scheduler/           # 调度台核心代码
+│   ├── main.py         # FastAPI 服务
+│   ├── registry.py     # Agent 注册表
+│   ├── client.py       # A2A Client
+│   └── workflow.py     # 编排引擎
+├── agents/             # 示例 Agent
+│   ├── agent_a.py      # 文本处理 Agent
+│   └── agent_b.py      # 数据处理 Agent
+├── webui.py            # Streamlit Web UI
+├── registry.json       # Agent 注册信息（自动生成）
+└── requirements.txt
 ```
 
-## 数据库
+## API 文档
 
-系统使用 Supabase (PostgreSQL)，包含以下核心表：
+启动 Scheduler 后访问: http://localhost:8000/docs
 
-- `materials` - 物料主数据
-- `suppliers` - 供应商主数据
-- `purchase_requests` - 采购申请
-- `purchase_request_lines` - 采购申请行
-- `sourcing_tasks` - 寻源任务
-- `quotes` - 报价单
-- `framework_agreements` - 框架协议
-- `purchase_orders` - 采购订单
-- `purchase_order_lines` - 采购订单行
-- `goods_receipts` - 收货单
-- `audit_logs` - 审计日志
-- `agent_bindings` - Agent 注册（agent_id + role + webhook_url）
-- `po_send_failures` - PO 发送失败记录
+### 主要接口
 
-## License
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/registry/agents` | POST | 注册 Agent |
+| `/registry/agents` | GET | 列出所有 Agent |
+| `/tasks/send` | POST | 发送单任务 |
+| `/workflow/chain` | POST | 链式工作流 |
+| `/workflow/run` | POST | 自定义工作流 |
 
-MIT
+## 自定义 Agent
+
+只需要实现两个接口即可接入调度台：
+
+```python
+@app.post("/a2a/v1/tasks/send")
+async def handle_task(task: Task):
+    # 处理任务
+    return {
+        "id": task.id,
+        "status": "completed",
+        "output": {"result": "处理结果"}
+    }
+
+@app.get("/.well-known/agent.json")
+def agent_card():
+    # 返回 Agent 元数据
+    return {
+        "name": "my-agent",
+        "endpoint": "http://localhost:8003",
+        "skills": ["skill1", "skill2"]
+    }
+```
+
+## 扩展建议
+
+- **流式响应**: 实现 `/tasks/sendSubscribe` 接口支持 SSE
+- **持久化**: 使用 PostgreSQL 替代 JSON 文件
+- **认证**: 添加 API Key 或 JWT 认证
+- **监控**: 集成 Prometheus 监控任务执行情况

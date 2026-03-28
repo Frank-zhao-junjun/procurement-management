@@ -53,6 +53,11 @@ const menuItems = [
     icon: '📥',
   },
   {
+    title: 'Agent 管理',
+    href: '/agent-management',
+    icon: '🤖',
+  },
+  {
     title: '审计日志',
     href: '/audit-logs',
     icon: '📜',
