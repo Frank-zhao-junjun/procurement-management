@@ -16,9 +16,13 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // 所有 Agent 都可以查询任何采购申请（移除角色过滤）
+    // 使用子查询获取行数
     let query = client
       .from('purchase_requests')
-      .select('*', { count: 'exact' })
+      .select(`
+        *,
+        purchase_request_lines(count)
+      `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
@@ -36,8 +40,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // 处理 Supabase 嵌套查询返回的格式
+    // purchase_request_lines 会返回为 { count: number }[] 格式
+    const processedData = (data || []).map((item: any) => {
+      if (item.purchase_request_lines && Array.isArray(item.purchase_request_lines)) {
+        // 提取 count 值
+        item.lines_count = item.purchase_request_lines[0]?.count || 0;
+        delete item.purchase_request_lines;
+      }
+      return item;
+    });
+
     return NextResponse.json({
-      data,
+      data: processedData,
       total: count || 0,
       page,
       pageSize,

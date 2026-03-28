@@ -166,7 +166,7 @@ export default function PurchaseRequestsPage() {
                           {statusMap[request.status]?.label || request.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{request.purchase_request_lines?.length || 0}</TableCell>
+                      <TableCell>{request.lines_count || 0}</TableCell>
                       <TableCell>
                         {request.created_at ? new Date(request.created_at).toLocaleString('zh-CN') : '-'}
                       </TableCell>
