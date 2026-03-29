@@ -221,6 +221,32 @@ export async function sendWebhooks(
 }
 
 /**
+ * 获取 Buyer Agent 的 Webhook URL 列表
+ */
+export async function getBuyerWebhookUrls(): Promise<string[]> {
+  try {
+    const client = getSupabaseClient();
+    const { data, error } = await client
+      .from('agent_bindings')
+      .select('webhook_url')
+      .eq('role', 'buyer')
+      .not('webhook_url', 'is', null);
+
+    if (error) {
+      console.error('[Webhook] Failed to get buyer webhooks:', error);
+      return [];
+    }
+
+    return (data || [])
+      .map(row => row.webhook_url)
+      .filter((url): url is string => !!url && url.length > 0);
+  } catch (error) {
+    console.error('[Webhook] Failed to get buyer webhooks:', error);
+    return [];
+  }
+}
+
+/**
  * 获取 Manager Agent 的 Webhook URL 列表
  */
 export async function getManagerWebhookUrls(): Promise<string[]> {
@@ -282,6 +308,26 @@ export async function notifyManagers(
   
   if (urls.length === 0) {
     console.info(`[Webhook] No manager webhooks configured for event: ${event}`);
+    return [];
+  }
+
+  return Promise.all(
+    urls.map(url => sendWebhook(url, event, data, options))
+  );
+}
+
+/**
+ * 通知所有 Buyer（PO 创建、待收货等）
+ */
+export async function notifyBuyers(
+  event: string,
+  data: Record<string, any>,
+  options: { entityType?: string; entityId?: string | number } = {}
+): Promise<WebhookResult[]> {
+  const urls = await getBuyerWebhookUrls();
+
+  if (urls.length === 0) {
+    console.info(`[Webhook] No buyer webhooks configured for event: ${event}`);
     return [];
   }
 

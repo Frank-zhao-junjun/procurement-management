@@ -211,46 +211,6 @@ export const agentsApi = {
     api.delete(`/agent-bindings/${id}`),
 };
 
-// ========== A2A Scheduler API ==========
 
-// A2A 内部 Agent 注册（与采购系统自身集成）
-export const a2aAgentsApi = {
-  // 获取外部 Scheduler 的 Agent 列表
-  listRemote: () =>
-    api.get<{ data: any[]; error?: string; available?: boolean }>('/a2a'),
-
-  // 注册 Agent 到 Scheduler
-  registerRemote: (data: { name: string; endpoint: string; skills: string[]; description?: string }) =>
-    api.post<any>('/a2a', { path: '/registry/agents', data }),
-};
-
-// A2A 任务 API
-export const a2aTasksApi = {
-  // 发送任务
-  send: (agent: string, skill: string, input?: Record<string, any>) =>
-    api.post<any>('/a2a/tasks/send', { agent, skill, input }),
-};
-
-// A2A 工作流 API
-export const a2aWorkflowApi = {
-  // 链式执行
-  chain: (agents: string[], input?: Record<string, any>) =>
-    api.post<any>('/a2a/workflow/chain', { agents, input }),
-
-  // 自定义工作流
-  run: (steps: Array<{ agent: string; skill: string; input_mapping?: Record<string, string> }>, context?: Record<string, any>) =>
-    api.post<any>('/a2a/workflow/run', { steps, context }),
-};
-
-// A2A 通知 API
-export const a2aNotifyApi = {
-  // 向指定 Agent 发送通知
-  send: (to: string, message: string, options?: { from?: string; priority?: string }) =>
-    api.post<any>('/a2a/notify', { to, message, ...options }),
-
-  // 广播消息给所有 Agent
-  broadcast: (message: string, options?: { from?: string; role?: string }) =>
-    api.put<any>('/a2a/notify', { message, ...options }),
-};
 
 export type { RequestOptions };

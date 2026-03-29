@@ -1,319 +1,32 @@
 /**
- * Agent 通知业务逻辑
- * 
- * 在 Coze 沙箱环境中，A2A Scheduler 可能不可用。
- * 此模块作为可选能力实现，通知失败时不会影响主业务流程。
- * 
- * 主要通知方式（按优先级）：
- * 1. Webhook - Manager Agent 注册的 Webhook URL（主要方式，在 Coze 沙箱中可用）
- * 2. A2A - 通过 A2A Scheduler 通知（可选能力，在完整环境中可用）
+ * 业务事件 Webhook 通知
+ *
+ * 统一通过 sendWebhook / notifyManagers / notifyBuyers 发送，并写入 webhook_logs。
  */
 
 import { getSupabaseClient } from '@/storage/database';
+import {
+  notifyManagers,
+  notifyBuyers,
+  type WebhookResult,
+} from '@/lib/webhook';
 
-/**
- * 通知事件类型
- */
-export type NotifyEvent = {
-  type: 'pr_submitted' | 'po_created' | 'gr_pending' | 'over_receipt_pending' | 'contract_pending' | 'pr_approved';
-  data: Record<string, any>;
+export type WebhookNotifyResult = {
+  success: boolean;
+  results: WebhookResult[];
 };
 
-/**
- * 获取 A2A Scheduler 配置
- */
-function getA2AConfig() {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:5000';
-  const a2aUrl = process.env.A2A_SCHEDULER_URL || 'http://localhost:8000';
-  return { baseUrl, a2aUrl };
+function summarizeResults(results: WebhookResult[]): WebhookNotifyResult {
+  return {
+    success: results.some(r => r.success),
+    results,
+  };
 }
 
 /**
- * 根据事件类型获取通知目标
+ * PR 提交 → 通知所有配置了 Webhook 的 Manager
  */
-function getNotifyTargets(event: NotifyEvent): { agent: string; message: string; priority: string }[] {
-  const { type, data } = event;
-
-  switch (type) {
-    case 'pr_submitted':
-      return [{
-        agent: 'manager-agent',
-        message: `新的采购申请已提交，请及时处理。\n申请人: ${data.applicant_name || '未知'}\n申请单号: ${data.pr_number}\n总金额: ¥${(data.total_amount || 0).toLocaleString()}`,
-        priority: 'high',
-      }];
-
-    case 'po_created':
-      return [{
-        agent: 'logistics-agent',
-        message: `新的采购订单已创建。\n订单号: ${data.po_number}\n供应商: ${data.supplier_name}\n预计交付日期: ${data.expected_delivery_date || '待确认'}`,
-        priority: 'normal',
-      }];
-
-    case 'gr_pending':
-      return [{
-        agent: 'logistics-agent',
-        message: `有待处理的收货单需要确认。\nPO号: ${data.po_number}\n收货单号: ${data.gr_number}\n待验数量: ${data.pending_quantity}`,
-        priority: 'high',
-      }];
-
-    case 'over_receipt_pending':
-      return [{
-        agent: 'manager-agent',
-        message: `有超收待审批，需要您确认。\n收货单号: ${data.gr_number}\n超收数量: ${data.over_quantity}\n超收原因: ${data.reason || '未填写'}`,
-        priority: 'high',
-      }];
-
-    case 'contract_pending':
-      return [{
-        agent: 'manager-agent',
-        message: `有新的框架协议待审批。\n协议名称: ${data.contract_name}\n供应商: ${data.supplier_name}\n有效期至: ${data.valid_until}`,
-        priority: 'normal',
-      }];
-
-    default:
-      return [];
-  }
-}
-
-/**
- * 发送 A2A 通知（可选能力）
- * 
- * 在 Coze 沙箱环境中，此功能可能不可用。
- * 调用方应忽略失败，不影响主业务流程。
- */
-async function sendA2ANotification(
-  to: string,
-  message: string,
-  options?: { from?: string; priority?: string }
-): Promise<{ success: boolean; error?: string }> {
-  const { baseUrl } = getA2AConfig();
-
-  try {
-    const response = await fetch(`${baseUrl}/api/a2a/notify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: options?.from || 'purchasing-system',
-        to,
-        message,
-        priority: options?.priority || 'normal',
-      }),
-      signal: AbortSignal.timeout(5000), // 5秒超时，避免阻塞
-    });
-
-    if (!response.ok) {
-      const result = await response.json();
-      // 如果是 503（服务不可用），说明 A2A Scheduler 未连接，这是预期的
-      if (response.status === 503) {
-        return { success: false, error: 'A2A_NOT_AVAILABLE' };
-      }
-      return { success: false, error: result.error || `HTTP ${response.status}` };
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    if (error.name === 'TimeoutError') {
-      return { success: false, error: 'A2A_NOT_AVAILABLE' };
-    }
-    if (error.code === 'ECONNREFUSED') {
-      return { success: false, error: 'A2A_NOT_AVAILABLE' };
-    }
-    console.warn('[A2A] Notification failed:', error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * 发送业务事件通知
- * 
- * 注意：这是可选能力，在 Coze 沙箱中 A2A Scheduler 可能不可用。
- * 此函数不会抛出异常，失败时静默降级。
- */
-export async function notifyBusinessEvent(event: NotifyEvent): Promise<{ 
-  success: boolean; 
-  results: any[];
-  a2aAvailable: boolean;
-}> {
-  const targets = getNotifyTargets(event);
-  
-  if (targets.length === 0) {
-    return { success: true, results: [], a2aAvailable: true };
-  }
-
-  const results: any[] = [];
-  let a2aAvailable = false;
-
-  for (const target of targets) {
-    const result = await sendA2ANotification(target.agent, target.message, {
-      priority: target.priority,
-    });
-    
-    results.push({ agent: target.agent, ...result });
-    
-    if (result.success) {
-      a2aAvailable = true;
-    }
-  }
-
-  // 至少有一个成功就算成功
-  const success = results.some(r => r.success);
-  
-  return { success, results, a2aAvailable };
-}
-
-/**
- * PR 提交时触发通知
- */
-export async function onPRSubmitted(prId: number) {
-  const client = getSupabaseClient();
-  const { data: pr } = await client
-    .from('purchase_requests')
-    .select('*, applicant:profiles(full_name)')
-    .eq('id', prId)
-    .single();
-
-  if (pr) {
-    const result = await notifyBusinessEvent({
-      type: 'pr_submitted',
-      data: {
-        pr_number: pr.pr_number,
-        applicant_name: pr.applicant?.full_name,
-        total_amount: pr.total_amount,
-      },
-    });
-    
-    // 如果 A2A 不可用，静默降级（不影响主流程）
-    if (!result.a2aAvailable) {
-      console.info('[Notification] A2A not available, skipping Agent notification for PR:', pr.pr_number);
-    }
-    
-    return result;
-  }
-
-  return { success: false, results: [], a2aAvailable: false };
-}
-
-/**
- * PO 创建时触发通知
- */
-export async function onPOCreated(poId: number) {
-  const client = getSupabaseClient();
-  const { data: po } = await client
-    .from('purchase_orders')
-    .select('*')
-    .eq('id', poId)
-    .single();
-
-  if (po) {
-    const result = await notifyBusinessEvent({
-      type: 'po_created',
-      data: {
-        po_number: po.po_number,
-        supplier_name: po.supplier_snapshot?.name,
-        expected_delivery_date: po.expected_delivery_date,
-      },
-    });
-    
-    if (!result.a2aAvailable) {
-      console.info('[Notification] A2A not available, skipping Agent notification for PO:', po.po_number);
-    }
-    
-    return result;
-  }
-
-  return { success: false, results: [], a2aAvailable: false };
-}
-
-/**
- * 待收货时触发通知
- */
-export async function onGRPending(grId: number) {
-  const client = getSupabaseClient();
-  const { data: gr } = await client
-    .from('goods_receipts')
-    .select('*, purchase_order:purchase_orders(po_number)')
-    .eq('id', grId)
-    .single();
-
-  if (gr) {
-    return notifyBusinessEvent({
-      type: 'gr_pending',
-      data: {
-        gr_number: gr.gr_number,
-        po_number: gr.purchase_order?.po_number,
-        pending_quantity: gr.quantity,
-      },
-    });
-  }
-
-  return { success: false, results: [], a2aAvailable: false };
-}
-
-/**
- * 超收待审批时触发通知
- */
-export async function onOverReceiptPending(grId: number, overQuantity: number, reason: string) {
-  const client = getSupabaseClient();
-  const { data: gr } = await client
-    .from('goods_receipts')
-    .select('gr_number')
-    .eq('id', grId)
-    .single();
-
-  if (gr) {
-    return notifyBusinessEvent({
-      type: 'over_receipt_pending',
-      data: {
-        gr_number: gr.gr_number,
-        over_quantity: overQuantity,
-        reason,
-      },
-    });
-  }
-
-  return { success: false, results: [], a2aAvailable: false };
-}
-
-/**
- * 框架协议待审批时触发通知
- */
-export async function onContractPending(contractId: number) {
-  const client = getSupabaseClient();
-  const { data: contract } = await client
-    .from('contracts')
-    .select('*, supplier:suppliers(name)')
-    .eq('id', contractId)
-    .single();
-
-  if (contract) {
-    return notifyBusinessEvent({
-      type: 'contract_pending',
-      data: {
-        contract_name: contract.title,
-        supplier_name: contract.supplier?.name,
-        valid_until: contract.valid_until,
-      },
-    });
-  }
-
-  return { success: false, results: [], a2aAvailable: false };
-}
-
-/**
- * PR 审批完成时触发通知（A2A 可选能力）
- * 
- * 主要通知通过 Webhook 发送（见 approve/route.ts）
- * 此函数用于通过 A2A 通知 Manager（如果 A2A 可用）
- */
-export async function onPRApproved(
-  prId: number, 
-  approved: boolean, 
-  approvalResult: {
-    autoPOs: any[];
-    sourcingTasks: any[];
-    faMatches: any[];
-  }
-) {
+export async function onPRSubmitted(prId: number): Promise<WebhookNotifyResult> {
   const client = getSupabaseClient();
   const { data: pr } = await client
     .from('purchase_requests')
@@ -322,27 +35,169 @@ export async function onPRApproved(
     .single();
 
   if (!pr) {
-    return { success: false, results: [], a2aAvailable: false };
+    return { success: false, results: [] };
   }
 
-  let message: string;
-  if (approved) {
-    const poCount = approvalResult.autoPOs.length;
-    const scCount = approvalResult.sourcingTasks.length;
-    message = `采购申请已审批通过。\n申请单号: ${pr.pr_number}\n申请人: ${pr.applicant?.full_name || '未知'}\n自动创建采购订单: ${poCount} 张\n创建寻源任务: ${scCount} 个`;
-  } else {
-    message = `采购申请已被拒绝。\n申请单号: ${pr.pr_number}\n申请人: ${pr.applicant?.full_name || '未知'}`;
-  }
-
-  return notifyBusinessEvent({
-    type: 'pr_approved',
-    data: {
+  const results = await notifyManagers(
+    'pr_submitted',
+    {
+      pr_id: pr.id,
       pr_number: pr.pr_number,
-      applicant_name: pr.applicant?.full_name,
-      approved,
-      auto_pos: approvalResult.autoPOs,
-      sourcing_tasks: approvalResult.sourcingTasks,
-      message,
+      applicant_name: (pr as { applicant?: { full_name?: string } }).applicant?.full_name,
+      total_amount: pr.total_amount,
     },
-  });
+    { entityType: 'purchase_request', entityId: pr.id }
+  );
+
+  return summarizeResults(results);
+}
+
+/**
+ * PO 创建 → 通知所有配置了 Webhook 的 Buyer
+ */
+export async function onPOCreated(poId: number): Promise<WebhookNotifyResult> {
+  const client = getSupabaseClient();
+  const { data: po } = await client
+    .from('purchase_orders')
+    .select('*')
+    .eq('id', poId)
+    .single();
+
+  if (!po) {
+    return { success: false, results: [] };
+  }
+
+  const snap = po.supplier_snapshot;
+  const supplierName =
+    typeof snap === 'string'
+      ? snap
+      : (snap as { name?: string } | null)?.name ?? '';
+
+  const results = await notifyBuyers(
+    'po_created',
+    {
+      po_id: po.id,
+      po_number: po.po_number,
+      supplier_name: supplierName,
+      expected_delivery_date: po.expected_delivery_date ?? po.delivery_date,
+    },
+    { entityType: 'purchase_order', entityId: po.id }
+  );
+
+  return summarizeResults(results);
+}
+
+/**
+ * 待收货相关（预留：可由收货流程调用）
+ */
+export async function onGRPending(grId: number): Promise<WebhookNotifyResult> {
+  const client = getSupabaseClient();
+  const { data: gr } = await client
+    .from('goods_receipts')
+    .select('*, purchase_order:purchase_orders(po_number)')
+    .eq('id', grId)
+    .single();
+
+  if (!gr) {
+    return { success: false, results: [] };
+  }
+
+  const po = gr.purchase_order as { po_number?: string } | null;
+
+  const results = await notifyBuyers(
+    'gr_pending',
+    {
+      gr_id: gr.id,
+      gr_number: gr.gr_number,
+      po_number: po?.po_number,
+      pending_quantity: gr.quantity,
+    },
+    { entityType: 'goods_receipt', entityId: gr.id }
+  );
+
+  return summarizeResults(results);
+}
+
+/**
+ * 框架协议提交待审批 → 通知 Manager
+ */
+export async function onContractPending(contractId: number): Promise<WebhookNotifyResult> {
+  const client = getSupabaseClient();
+  const { data: contract } = await client
+    .from('contracts')
+    .select('*, supplier:suppliers(name)')
+    .eq('id', contractId)
+    .single();
+
+  if (!contract) {
+    return { success: false, results: [] };
+  }
+
+  const sup = contract.supplier as { name?: string } | null;
+
+  const results = await notifyManagers(
+    'contract_pending',
+    {
+      contract_id: contract.id,
+      contract_name: contract.title,
+      supplier_name: sup?.name,
+      valid_until: contract.valid_until,
+    },
+    { entityType: 'contract', entityId: contract.id }
+  );
+
+  return summarizeResults(results);
+}
+
+/**
+ * PR 审批结束 → 通知 Manager（摘要；需求方详细内容由 approve 路由单独推送）
+ */
+export async function onPRApproved(
+  prId: number,
+  approved: boolean,
+  approvalResult: {
+    autoPOs: any[];
+    sourcingTasks: any[];
+    faMatches: any[];
+  }
+): Promise<WebhookNotifyResult> {
+  const client = getSupabaseClient();
+  const { data: pr } = await client
+    .from('purchase_requests')
+    .select('*, applicant:profiles(full_name)')
+    .eq('id', prId)
+    .single();
+
+  if (!pr) {
+    return { success: false, results: [] };
+  }
+
+  const event = approved ? 'pr_approved' : 'pr_rejected';
+  const applicant = (pr as { applicant?: { full_name?: string } }).applicant;
+
+  const results = await notifyManagers(
+    event,
+    {
+      pr_id: pr.id,
+      pr_number: pr.pr_number,
+      approved,
+      applicant_name: applicant?.full_name,
+      ...(approved && {
+        auto_created_pos: approvalResult.autoPOs.map((po: { id: number; po_number: string }) => ({
+          po_id: po.id,
+          po_number: po.po_number,
+        })),
+        sourcing_tasks: approvalResult.sourcingTasks.map(
+          (sc: { id: number; task_number: string }) => ({
+            task_id: sc.id,
+            task_number: sc.task_number,
+          })
+        ),
+        fa_matches_count: approvalResult.faMatches.length,
+      }),
+    },
+    { entityType: 'purchase_request', entityId: pr.id }
+  );
+
+  return summarizeResults(results);
 }

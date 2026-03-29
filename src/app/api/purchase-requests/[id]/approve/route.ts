@@ -151,7 +151,7 @@ export async function POST(
       }).catch(err => console.error('[Webhook] Failed to notify requester:', err));
     }
 
-    // 2. 通知所有 Manager（异步）- 包括 A2A
+    // 2. 通知所有 Manager（摘要）
     const managerNotification = await onPRApproved(existing.id, approved, approvalResult);
     
     // 3. 如果创建了 PO 或寻源任务，通知 Buyer

@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
-import { getManagerWebhooks } from '@/storage/database/agent-binding';
 import { getBeijingDateString, getBeijingTimeString, getBeijingISOString } from '@/lib/datetime';
-import { onOverReceiptPending } from '@/lib/agent-notify';
+import { notifyManagers } from '@/lib/webhook';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
@@ -199,25 +198,24 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // 通知所有 Manager Agent 有超收待审批
-      notifyOverdeliveryPending({
-        event: 'overdelivery_pending',
-        grId: gr.id,
-        grNumber: grNumber,
-        poId: poId || poLine.order_id,
-        poLineId: poLineId,
-        orderQty: orderQty,
-        grQuantity: grQuantity,
-        overdeliveryRatio: overdeliveryRatio,
-        requestedBy: actor,
-        requestedAt: getBeijingISOString(),
-      }).catch(err => {
+      // 通知所有配置了 Webhook 的 Manager（统一 payload / 审计 / 重试）
+      notifyManagers(
+        'overdelivery_pending',
+        {
+          gr_id: gr.id,
+          gr_number: grNumber,
+          po_id: poId || poLine.order_id,
+          po_line_id: poLineId,
+          order_qty: orderQty,
+          gr_quantity: grQuantity,
+          overdelivery_ratio: overdeliveryRatio,
+          requested_by: actor,
+          requested_at: getBeijingISOString(),
+          notes: body.notes || null,
+        },
+        { entityType: 'goods_receipt', entityId: gr.id }
+      ).catch((err: Error) => {
         console.error('Failed to notify managers via webhook:', err);
-      });
-
-      // 同时通过 Agent 通知 Manager
-      onOverReceiptPending(gr.id, grQuantity, body.notes || '').catch(err => {
-        console.error('Failed to notify managers via Agent:', err);
       });
 
       return NextResponse.json({
@@ -332,54 +330,4 @@ async function updatePOStatus(client: any, poId: number) {
   } catch (error) {
     console.error('Error updating PO status:', error);
   }
-}
-
-// 通知所有 Manager Agent 有超收待审批
-async function notifyOverdeliveryPending(payload: {
-  event: string;
-  grId: number;
-  grNumber: string;
-  poId: number;
-  poLineId: number;
-  orderQty: number;
-  grQuantity: number;
-  overdeliveryRatio: number;
-  requestedBy: string;
-  requestedAt: string;
-}): Promise<void> {
-  const webhooks = await getManagerWebhooks();
-
-  if (webhooks.length === 0) {
-    console.log('No manager webhooks configured');
-    return;
-  }
-
-  const results = await Promise.allSettled(
-    webhooks.map(async (webhookUrl) => {
-      try {
-        const response = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'ProcurementSystem-Webhook/1.0',
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return { url: webhookUrl, success: true };
-      } catch (err) {
-        return { url: webhookUrl, success: false, error: err instanceof Error ? err.message : 'Unknown error' };
-      }
-    })
-  );
-
-  const succeeded = results.filter(r => r.status === 'fulfilled' && (r as any).value.success).length;
-  const failed = results.filter(r => r.status === 'rejected' || !(r as any).value.success).length;
-
-  console.log(`Webhook notifications: ${succeeded} succeeded, ${failed} failed`);
 }
