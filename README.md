@@ -59,7 +59,7 @@ POST /api/purchase-requests
 - **采购申请 (PR)** - 创建、提交、审批
 - **框架协议 (FA)** - 自动匹配、手动确认
 - **寻源任务 (SC)** - 供应商询价
-- **报价单 (Quote)** - 多供应商竞价
+- **报价单 (Quote)** - 多供应商竞价、授标自动创建 PO
 - **采购订单 (PO)** - 生成、发送、重试
 - **收货单 (GR)** - 标准收货、超收审批、退货
 - **审计日志** - 全操作记录（含 system 角色）
@@ -279,9 +279,12 @@ psql $DATABASE_URL < drizzle/0002_drop_feishu_columns.sql
 - ✅ **统一 Webhook 通知** - 所有业务通知统一使用 Webhook 方式
 - ✅ **简化 Agent 管理页面** - 移除任务发送和工作流编排 Tab
 
-**超收通知改进：**
-- ✅ 超收待审批直接使用 `notifyManagers` 发送 Webhook 通知
-- ✅ 统一 Payload 格式、签名、重试、审计
+**功能增强：**
+- ✅ **授标自动创建 PO** - 授标完成后自动创建采购订单并通知 Buyer
+- ✅ **超收通知改进** - 直接使用 `notifyManagers` 发送 Webhook 通知
+
+**修复：**
+- ✅ **移除 submitted_at 字段** - 修复提交审批数据库错误
 
 ### v1.5.0 (2024-03-28)
 

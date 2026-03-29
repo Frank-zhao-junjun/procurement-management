@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
-import { getRequesterWebhooks } from '@/storage/database/agent-binding';
+import { getBeijingISOString } from '@/lib/datetime';
+import { notifyBuyers } from '@/lib/webhook';
 
 /**
  * POST /api/quotes/[id]/award - 授标（标记为中标）
@@ -10,9 +11,10 @@ import { getRequesterWebhooks } from '@/storage/database/agent-binding';
  * 
  * 流程：
  * 1. 标记报价单为 awarded
- * 2. 自动创建 PO
+ * 2. 自动创建 PO（核心功能）
  * 3. 更新寻源任务状态
  * 4. 更新 PR 行状态
+ * 5. 通知 Buyer Agent
  */
 export async function POST(
   request: NextRequest,
@@ -66,7 +68,7 @@ export async function POST(
       .from('quotes')
       .update({ 
         awarded: 'awarded',
-        updated_at: new Date().toISOString(),
+        updated_at: getBeijingISOString(),
       })
       .eq('id', quoteId);
 
@@ -110,6 +112,7 @@ export async function POST(
         delivery_date: deliveryDate,
         status: 'draft',
         created_by: actor,
+        pr_id: sourcingTask.pr_id,
       })
       .select()
       .single();
@@ -148,20 +151,22 @@ export async function POST(
       .from('sourcing_tasks')
       .update({ 
         status: 'completed',
-        updated_at: new Date().toISOString(),
+        updated_at: getBeijingISOString(),
       })
       .eq('id', sourcingTask.id);
 
     // 6. 更新 PR 行状态
-    await client
-      .from('purchase_request_lines')
-      .update({
-        progress: 'ordered',
-        purchase_order_id: po.id,
-        po_line_number: 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', sourcingTask.pr_line_id);
+    if (sourcingTask.pr_line_id) {
+      await client
+        .from('purchase_request_lines')
+        .update({
+          progress: 'ordered',
+          purchase_order_id: po.id,
+          po_line_number: 1,
+          updated_at: getBeijingISOString(),
+        })
+        .eq('id', sourcingTask.pr_line_id);
+    }
 
     // 7. 记录审计日志
     await client.from('audit_logs').insert([
@@ -171,7 +176,12 @@ export async function POST(
         action: 'award',
         actor,
         actor_role: role,
-        detail: { quote_number: quote.quote_number, po_number: poNumber },
+        detail: { 
+          quote_number: quote.quote_number, 
+          po_number: poNumber,
+          quote_unit_price: quote.unit_price,
+          quote_quantity: quote.quantity,
+        },
       },
       {
         entity_type: 'purchase_order',
@@ -184,20 +194,33 @@ export async function POST(
           quote_id: quoteId,
           quote_number: quote.quote_number,
           sourcing_task_id: sourcingTask.id,
+          sourcing_task_number: sourcingTask.task_number,
         },
       },
     ]);
 
-    // 8. 通知 Requester Agent（PO 已生成）
-    notifyRequesters({
-      event: 'po_created',
-      poId: po.id,
-      poNumber: poNumber,
-      prId: sourcingTask.pr_id,
-      supplierName: quote.supplier_snapshot || '未知供应商',
-      createdAt: new Date().toISOString(),
-    }).catch(err => {
-      console.error('Failed to notify requesters:', err);
+    // 8. 通知所有 Buyer Agent（统一 Webhook）
+    notifyBuyers(
+      'po_created',
+      {
+        po_id: po.id,
+        po_number: poNumber,
+        supplier_name: quote.supplier_snapshot || '未知供应商',
+        delivery_date: deliveryDate,
+        quote_id: quoteId,
+        quote_number: quote.quote_number,
+        sourcing_task_id: sourcingTask.id,
+        sourcing_task_number: sourcingTask.task_number,
+        material_snapshot: quote.material_snapshot || sourcingTask.material_snapshot,
+        quantity: quote.quantity,
+        unit_price: quote.unit_price,
+        total_price: quote.total_price,
+        created_by: actor,
+        created_at: getBeijingISOString(),
+      },
+      { entityType: 'purchase_order', entityId: po.id }
+    ).catch((err: Error) => {
+      console.error('Failed to notify buyers:', err);
     });
 
     return NextResponse.json({
@@ -212,56 +235,12 @@ export async function POST(
         id: po.id,
         po_number: poNumber,
         status: 'draft',
+        supplier_name: quote.supplier_snapshot,
+        delivery_date: deliveryDate,
+        total_price: quote.total_price,
       },
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-}
-
-// 通知所有 Requester Agent（当 PO 生成时通知申请人）
-async function notifyRequesters(payload: {
-  event: string;
-  poId: number;
-  poNumber: string;
-  prId?: number;
-  prNumber?: string;
-  supplierName: string;
-  createdAt: string;
-}): Promise<void> {
-  const webhooks = await getRequesterWebhooks();
-
-  if (webhooks.length === 0) {
-    console.log('No requester webhooks configured');
-    return;
-  }
-
-  const results = await Promise.allSettled(
-    webhooks.map(async (webhookUrl) => {
-      try {
-        const response = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'ProcurementSystem-Webhook/1.0',
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return { url: webhookUrl, success: true };
-      } catch (err) {
-        return { url: webhookUrl, success: false, error: err instanceof Error ? err.message : 'Unknown error' };
-      }
-    })
-  );
-
-  const succeeded = results.filter(r => r.status === 'fulfilled' && (r as any).value.success).length;
-  const failed = results.filter(r => r.status === 'rejected' || !(r as any).value.success).length;
-
-  console.log(`Requester webhook notifications: ${succeeded} succeeded, ${failed} failed`);
 }
