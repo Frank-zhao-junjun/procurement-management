@@ -93,64 +93,32 @@ POST /api/purchase-requests
   - `buyer` - 采购员
   - `manager` - 审批人/经理
   - `system` - 系统操作（审计日志专用）
-- **Webhook 通知**：Manager Agent 可配置 `webhookUrl` 接收待审批事件
-- **A2A 通知**：支持 Agent 间主动通知，通过 A2A Scheduler 实现
+- **Webhook 通知**：Manager Agent 可配置 `webhookUrl` 接收待审批事件（主要方式）
+- **A2A 通知**：支持 Agent 间主动通知（可选能力，依赖 A2A Scheduler）
 
-## A2A 通知系统
+## 通知能力说明
 
-系统集成了 A2A Scheduler，支持 Agent 间的主动通知功能。
+### Webhook 通知（主要方式）
 
-### 通知触发场景
-
-| 业务场景 | 通知目标 | 说明 |
-|----------|----------|------|
-| PR 提交 | manager-agent | 采购申请提交后自动通知 |
-| PO 创建 | logistics-agent | 采购订单创建后自动通知 |
-| 超收待审批 | manager-agent | 超收超过 5% 需审批时通知 |
-| 框架协议待审批 | manager-agent | 框架协议提交审批时通知 |
-
-### 直接发送通知
-
-```bash
-# 向指定 Agent 发送通知
-POST /api/a2a/notify
--H "Content-Type: application/json"
-{"to": "manager-agent", "message": "您有一笔采购申请待审批", "priority": "high"}
-
-# 广播消息给所有 Agent
-PUT /api/a2a/notify
--H "Content-Type: application/json"
-{"message": "系统将于今晚进行维护", "role": "manager"}
-```
-
-### 查询已注册 Agent
-
-```bash
-# 查看 A2A 连接状态
-GET /api/a2a
-
-# 返回示例
-{
-  "data": [
-    {
-      "name": "manager-agent",
-      "endpoint": "http://localhost:8000/agents/manager-agent",
-      "skills": ["pr_approval", "contract_approval"],
-      "status": "connected"
-    }
-  ],
-  "available": true
-}
-```
-
-## Webhook 事件通知
-
-Manager Agent 可通过 `webhookUrl` 接收系统事件通知：
+Manager Agent 可通过 `webhookUrl` 接收系统事件通知，**在 Coze 沙箱环境中可用**。
 
 | 事件 | 触发时机 |
 |------|----------|
 | `pr_submitted` | 采购申请提交后 |
 | `overdelivery_pending` | 超收待审批时 |
+
+### A2A 通知（可选能力）
+
+在完整环境中支持 Agent 间的主动通知，**在 Coze 沙箱中可能不可用**。
+
+| 业务场景 | 通知目标 | 说明 |
+|----------|----------|------|
+| PR 提交 | manager-agent | 通过 A2A Scheduler 通知 |
+| PO 创建 | logistics-agent | 通过 A2A Scheduler 通知 |
+| 超收待审批 | manager-agent | 通过 A2A Scheduler 通知 |
+| 框架协议待审批 | manager-agent | 通过 A2A Scheduler 通知 |
+
+**注意**：A2A Scheduler 需要在独立端口（默认 8000）运行，在 Coze 沙箱环境中可能因端口未映射而不可用。通知失败时会静默降级，不影响主业务流程。
 
 ## 角色权限
 
