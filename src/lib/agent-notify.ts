@@ -15,7 +15,7 @@ import { getSupabaseClient } from '@/storage/database';
  * 通知事件类型
  */
 export type NotifyEvent = {
-  type: 'pr_submitted' | 'po_created' | 'gr_pending' | 'over_receipt_pending' | 'contract_pending';
+  type: 'pr_submitted' | 'po_created' | 'gr_pending' | 'over_receipt_pending' | 'contract_pending' | 'pr_approved';
   data: Record<string, any>;
 };
 
@@ -297,4 +297,52 @@ export async function onContractPending(contractId: number) {
   }
 
   return { success: false, results: [], a2aAvailable: false };
+}
+
+/**
+ * PR 审批完成时触发通知（A2A 可选能力）
+ * 
+ * 主要通知通过 Webhook 发送（见 approve/route.ts）
+ * 此函数用于通过 A2A 通知 Manager（如果 A2A 可用）
+ */
+export async function onPRApproved(
+  prId: number, 
+  approved: boolean, 
+  approvalResult: {
+    autoPOs: any[];
+    sourcingTasks: any[];
+    faMatches: any[];
+  }
+) {
+  const client = getSupabaseClient();
+  const { data: pr } = await client
+    .from('purchase_requests')
+    .select('*, applicant:profiles(full_name)')
+    .eq('id', prId)
+    .single();
+
+  if (!pr) {
+    return { success: false, results: [], a2aAvailable: false };
+  }
+
+  let message: string;
+  if (approved) {
+    const poCount = approvalResult.autoPOs.length;
+    const scCount = approvalResult.sourcingTasks.length;
+    message = `采购申请已审批通过。\n申请单号: ${pr.pr_number}\n申请人: ${pr.applicant?.full_name || '未知'}\n自动创建采购订单: ${poCount} 张\n创建寻源任务: ${scCount} 个`;
+  } else {
+    message = `采购申请已被拒绝。\n申请单号: ${pr.pr_number}\n申请人: ${pr.applicant?.full_name || '未知'}`;
+  }
+
+  return notifyBusinessEvent({
+    type: 'pr_approved',
+    data: {
+      pr_number: pr.pr_number,
+      applicant_name: pr.applicant?.full_name,
+      approved,
+      auto_pos: approvalResult.autoPOs,
+      sourcing_tasks: approvalResult.sourcingTasks,
+      message,
+    },
+  });
 }

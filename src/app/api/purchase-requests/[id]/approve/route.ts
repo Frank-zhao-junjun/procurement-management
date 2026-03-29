@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
+import { notifyManagers, sendWebhook, getAgentWebhookUrl } from '@/lib/webhook';
+import { onPRApproved } from '@/lib/agent-notify';
 
 // POST /api/purchase-requests/[id]/approve - 审批采购申请
 export async function POST(
@@ -19,7 +21,7 @@ export async function POST(
     // 检查当前状态
     const { data: existing } = await client
       .from('purchase_requests')
-      .select('id, status, pr_number')
+      .select('id, status, pr_number, applicant')
       .eq('id', parseInt(id, 10))
       .single();
 
@@ -27,7 +29,7 @@ export async function POST(
       return NextResponse.json({ error: 'Purchase request not found' }, { status: 404 });
     }
 
-    if (existing.status !== 'submitted') {
+    if (existing.status !== 'submitted' && existing.status !== 'pending') {
       return NextResponse.json(
         { error: `Cannot approve request in status: ${existing.status}` },
         { status: 400 }
@@ -50,7 +52,20 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 如果批准，更新所有行的进度为 approved
+    // 审批结果数据（用于通知）
+    let approvalResult: {
+      approved: boolean;
+      autoPOs: any[];
+      sourcingTasks: any[];
+      faMatches: any[];
+    } = {
+      approved: false,
+      autoPOs: [],
+      sourcingTasks: [],
+      faMatches: [],
+    };
+
+    // 如果批准，更新所有行的进度为 approved，并处理 FA 匹配/PO 创建
     if (approved) {
       await client
         .from('purchase_request_lines')
@@ -58,7 +73,13 @@ export async function POST(
         .eq('request_id', parseInt(id, 10));
 
       // 尝试自动匹配框架协议
-      await matchFrameworkAgreements(client, parseInt(id, 10), actor);
+      const matchResult = await matchFrameworkAgreements(client, parseInt(id, 10), actor);
+      approvalResult = {
+        approved: true,
+        autoPOs: matchResult.autoPOs,
+        sourcingTasks: matchResult.sourcingTasks,
+        faMatches: matchResult.faMatches,
+      };
     }
 
     // 记录审计日志
@@ -72,10 +93,11 @@ export async function POST(
         from_status: 'submitted',
         to_status: newStatus,
         note: body.note,
+        ...approvalResult,
       },
     });
 
-    // 获取完整数据（分开查询避免嵌套）
+    // 获取完整数据
     const { data: fullPR } = await client
       .from('purchase_requests')
       .select('*')
@@ -87,14 +109,103 @@ export async function POST(
       .select('*')
       .eq('request_id', parseInt(id, 10));
 
-    return NextResponse.json({ data: { ...fullPR, purchase_request_lines: lines } });
+    const result = { ...fullPR, purchase_request_lines: lines };
+
+    // ========== Webhook 通知 ==========
+    
+    // 1. 通知需求方（PR 创建人）- Webhook 为主
+    const requesterWebhook = await getAgentWebhookUrl(existing.applicant);
+    if (requesterWebhook) {
+      const requesterEvent = approved ? 'pr_approved' : 'pr_rejected';
+      const requesterPayload = {
+        pr_id: existing.id,
+        pr_number: existing.pr_number,
+        status: newStatus,
+        approved_by: actor,
+        approved_at: new Date().toISOString(),
+        note: body.note || null,
+        // 批准时附带结果
+        ...(approved && {
+          auto_created_pos: approvalResult.autoPOs.map(po => ({
+            po_id: po.id,
+            po_number: po.po_number,
+            supplier_name: po.supplier_snapshot,
+          })),
+          sourcing_tasks: approvalResult.sourcingTasks.map(sc => ({
+            task_id: sc.id,
+            task_number: sc.task_number,
+            material_snapshot: sc.material_snapshot,
+          })),
+          fa_matches: approvalResult.faMatches.map(fa => ({
+            fa_id: fa.id,
+            fa_number: fa.fa_number,
+            supplier_name: fa.supplier_snapshot,
+          })),
+        }),
+      };
+      
+      // 异步发送，不阻塞返回
+      sendWebhook(requesterWebhook, requesterEvent, requesterPayload, {
+        entityType: 'purchase_request',
+        entityId: existing.id,
+      }).catch(err => console.error('[Webhook] Failed to notify requester:', err));
+    }
+
+    // 2. 通知所有 Manager（异步）- 包括 A2A
+    const managerNotification = await onPRApproved(existing.id, approved, approvalResult);
+    
+    // 3. 如果创建了 PO 或寻源任务，通知 Buyer
+    if (approvalResult.autoPOs.length > 0 || approvalResult.sourcingTasks.length > 0) {
+      // 查询 Buyer 的 Webhook
+      const { data: buyers } = await client
+        .from('agent_bindings')
+        .select('webhook_url, agent_id')
+        .eq('role', 'buyer')
+        .not('webhook_url', 'is', null);
+
+      for (const buyer of buyers || []) {
+        if (buyer.webhook_url) {
+          sendWebhook(buyer.webhook_url, 'pr_processing_task', {
+            pr_id: existing.id,
+            pr_number: existing.pr_number,
+            created_pos: approvalResult.autoPOs.map(po => ({
+              po_id: po.id,
+              po_number: po.po_number,
+            })),
+            sourcing_tasks: approvalResult.sourcingTasks.map(sc => ({
+              task_id: sc.id,
+              task_number: sc.task_number,
+            })),
+          }, {
+            entityType: 'purchase_request',
+            entityId: existing.id,
+          }).catch(err => console.error('[Webhook] Failed to notify buyer:', err));
+        }
+      }
+    }
+
+    return NextResponse.json({ 
+      data: result,
+      approval: approvalResult,
+      notification_sent: !!requesterWebhook,
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 // 尝试自动匹配框架协议，未匹配则创建寻源任务
-async function matchFrameworkAgreements(client: any, requestId: number, actor: string) {
+async function matchFrameworkAgreements(
+  client: any, 
+  requestId: number, 
+  actor: string
+): Promise<{ autoPOs: any[]; sourcingTasks: any[]; faMatches: any[] }> {
+  const result = {
+    autoPOs: [] as any[],
+    sourcingTasks: [] as any[],
+    faMatches: [] as any[],
+  };
+
   try {
     // 获取采购申请信息
     const { data: pr } = await client
@@ -103,7 +214,7 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
       .eq('id', requestId)
       .single();
 
-    if (!pr) return;
+    if (!pr) return result;
 
     // 获取采购申请行
     const { data: lines } = await client
@@ -116,7 +227,7 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
     const autoPOLines: any[] = [];
 
     for (const line of lines || []) {
-      // 获取上海时区日期（用于 FA 有效期判断）
+      // 获取上海时区日期
       const todayShanghai = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Shanghai',
         year: 'numeric',
@@ -124,7 +235,7 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
         day: '2-digit',
       }).format(new Date());
       
-      // 获取有效期内的框架协议（上海时区）
+      // 获取有效期内的框架协议
       const { data: agreements } = await client
         .from('framework_agreements')
         .select('*')
@@ -147,19 +258,20 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
         )];
 
         if (allMatches.length > 0) {
-          // 按价格升序，取最低价
           allMatches.sort((a, b) => Number(a.unit_price) - Number(b.unit_price));
           const best = allMatches[0];
           
-          // 判断匹配类型
           const isExactMatch = idMatches.some((m: any) => m.id === best.id);
           
           if (isExactMatch && line.material_id !== null) {
             // 物料 ID 精确匹配 → 自动创建 PO
-            autoPOLines.push({
-              line,
-              fa: best,
-              unitPrice: Number(best.unit_price),
+            autoPOLines.push({ line, fa: best, unitPrice: Number(best.unit_price) });
+            result.faMatches.push({
+              id: best.id,
+              fa_number: best.fa_number,
+              supplier_snapshot: best.supplier_snapshot,
+              unit_price: Number(best.unit_price),
+              match_type: 'material_id',
             });
           } else {
             // 文本相似匹配 → 需要用户确认
@@ -175,35 +287,23 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
               })
               .eq('id', line.id);
 
-            // 记录 Top-3 备选到审计日志
-            const top3 = allMatches.slice(0, 3);
-            await client.from('audit_logs').insert({
-              entity_type: 'purchase_request_line',
-              entity_id: line.id,
-              action: 'fa_candidates',
-              actor: 'system',
-              actor_role: 'system',
-              detail: {
-                candidates: top3.map((fa: any) => ({
-                  fa_id: fa.id,
-                  fa_number: fa.fa_number,
-                  supplier_snapshot: fa.supplier_snapshot,
-                  unit_price: Number(fa.unit_price),
-                })),
-                recommended_fa_id: best.id,
-                match_type: 'text_similarity',
-                requires_confirmation: true,
-              },
+            result.faMatches.push({
+              id: best.id,
+              fa_number: best.fa_number,
+              supplier_snapshot: best.supplier_snapshot,
+              unit_price: Number(best.unit_price),
+              match_type: 'text_similarity',
+              requires_confirmation: true,
             });
           }
           continue;
         }
       }
 
-      // 如果没有匹配到框架协议，创建寻源任务
+      // 没有匹配到框架协议，创建寻源任务
       const taskNumber = await numberGenerators.sc();
       
-      const { data: sourcingTask, error: scError } = await client
+      const { data: sourcingTask } = await client
         .from('sourcing_tasks')
         .insert({
           task_number: taskNumber,
@@ -218,7 +318,9 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
         .select()
         .single();
 
-      if (!scError && sourcingTask) {
+      if (sourcingTask) {
+        result.sourcingTasks.push(sourcingTask);
+        
         await client
           .from('purchase_request_lines')
           .update({
@@ -239,17 +341,22 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
       }
     }
 
-    // 自动创建采购订单（汇总所有精确匹配的 FA 行）
+    // 自动创建采购订单
     if (autoPOLines.length > 0) {
-      await createAutoPO(client, pr, autoPOLines, actor);
+      const pos = await createAutoPO(client, pr, autoPOLines, actor);
+      result.autoPOs = pos;
     }
   } catch (error) {
     console.error('Error matching framework agreements:', error);
   }
+
+  return result;
 }
 
 // 自动创建采购订单
-async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
+async function createAutoPO(client: any, pr: any, lines: any[], actor: string): Promise<any[]> {
+  const createdPOs: any[] = [];
+
   try {
     // 按供应商分组
     const supplierGroups: Record<number, any[]> = {};
@@ -261,12 +368,10 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
       supplierGroups[supplierId].push(item);
     }
 
-    // 为每个供应商创建一张 PO
     for (const [supplierId, supplierLines] of Object.entries(supplierGroups)) {
       const poNumber = await numberGenerators.po();
       const supplierName = supplierLines[0].fa.supplier_snapshot || '';
 
-      // 创建 PO 头
       const { data: po, error: poError } = await client
         .from('purchase_orders')
         .insert({
@@ -285,7 +390,6 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
         continue;
       }
 
-      // 创建 PO 行
       const poLines = supplierLines.map((item: any, index: number) => ({
         order_id: po.id,
         line_number: index + 1,
@@ -302,18 +406,8 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
         fa_id: item.fa.id,
       }));
 
-      const { error: linesError } = await client
-        .from('purchase_order_lines')
-        .insert(poLines);
+      await client.from('purchase_order_lines').insert(poLines);
 
-      if (linesError) {
-        console.error('Error creating auto PO lines:', linesError);
-        // 回滚 PO
-        await client.from('purchase_orders').delete().eq('id', po.id);
-        continue;
-      }
-
-      // 更新 PR 行状态
       for (const item of supplierLines) {
         await client
           .from('purchase_request_lines')
@@ -327,7 +421,6 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
           .eq('id', item.line.id);
       }
 
-      // 记录审计日志
       await client.from('audit_logs').insert({
         entity_type: 'purchase_order',
         entity_id: po.id,
@@ -343,13 +436,17 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string) {
           lines_count: supplierLines.length,
         },
       });
+
+      createdPOs.push(po);
     }
   } catch (error) {
     console.error('Error in createAutoPO:', error);
   }
+
+  return createdPOs;
 }
 
-// 文本归一化（去除首尾空格、多空格压缩、全角半角统一、英文大小写统一）
+// 文本归一化
 function normalizeText(text: string): string {
   return text
     .trim()
