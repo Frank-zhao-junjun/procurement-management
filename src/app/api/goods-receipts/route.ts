@@ -137,19 +137,16 @@ export async function POST(request: NextRequest) {
       isOverdelivery = overdeliveryRatio > OVERDELIVERY_THRESHOLD;
     }
 
-    // 构建快照数据
-    const poSnapshot = poHeader ? JSON.stringify({
-      po_number: poHeader.po_number,
-      supplier_snapshot: poHeader.supplier_snapshot,
-      status: poHeader.status,
-    }) : null;
+    // 构建快照数据（如果 PO 头存在）
+    let poSnapshot: string | null = null;
+    if (poHeader) {
+      poSnapshot = poHeader.po_number;
+    }
     
-    const poLineSnapshot = JSON.stringify({
-      material_snapshot: poLine.material_snapshot,
-      quantity: Number(poLine.quantity),
-      unit_price: Number(poLine.unit_price),
-      received_qty: Number(poLine.received_qty),
-    });
+    let poLineSnapshot: string | null = null;
+    if (poLine.material_snapshot) {
+      poLineSnapshot = poLine.material_snapshot;
+    }
 
     // 如果超收且当前角色不是 manager，需要审批
     if (isOverdelivery && role !== 'manager') {
@@ -169,8 +166,6 @@ export async function POST(request: NextRequest) {
           status: 'pending_approval', // 待审批状态
           is_overdelivery: true,
           overdelivery_ratio: overdeliveryRatio,
-          po_snapshot: poSnapshot,
-          po_line_snapshot: poLineSnapshot,
         })
         .select()
         .single();
@@ -252,8 +247,6 @@ export async function POST(request: NextRequest) {
         receipt_time: receiptTime,
         receiver: actor,
         notes: body.notes || null,
-        po_snapshot: poSnapshot,
-        po_line_snapshot: poLineSnapshot,
       })
       .select()
       .single();
