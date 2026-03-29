@@ -38,15 +38,25 @@ export async function PUT(
     const { actor, role: currentRole } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 权限检查：只有 manager 可以更新 Agent
-    if (currentRole !== 'manager') {
-      return NextResponse.json({ error: '只有 Manager 可以更新 Agent' }, { status: 403 });
+    // 获取要更新的 Agent 信息
+    const { data: existing } = await client
+      .from('agent_bindings')
+      .select('*')
+      .eq('id', parseInt(id, 10))
+      .single();
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Agent 不存在' }, { status: 404 });
     }
 
     // 构建更新数据
     const updateData: Record<string, any> = {};
     
+    // 角色更新：只有 Manager 可以更新
     if (body.role !== undefined) {
+      if (currentRole !== 'manager') {
+        return NextResponse.json({ error: '只有 Manager 可以更新角色' }, { status: 403 });
+      }
       const validRoles = ['requester', 'buyer', 'manager'];
       if (!validRoles.includes(body.role)) {
         return NextResponse.json({ 
@@ -56,6 +66,7 @@ export async function PUT(
       updateData.role = body.role;
     }
     
+    // Webhook URL 更新：任何人（包括人类页面）都可以更新
     if (body.webhookUrl !== undefined) {
       updateData.webhook_url = body.webhookUrl;
     }
