@@ -319,10 +319,16 @@ function TaskSendTab() {
     setLoading(true);
     try {
       const res = await a2aAgentsApi.listRemote();
-      if (res.error && !res.available) {
+      // 如果返回的是数组（即使是空数组），说明已连接
+      // 如果返回的是带有 error 和 available=false 的对象，说明未连接
+      if (Array.isArray(res)) {
+        setRemoteAgents(res);
+        setSchedulerAvailable(true);
+      } else if (res.error && !res.available) {
         setSchedulerAvailable(false);
+        setRemoteAgents([]);
       } else {
-        setRemoteAgents(Array.isArray(res) ? res : res.data || []);
+        setRemoteAgents(Array.isArray(res.data) ? res.data : []);
         setSchedulerAvailable(true);
       }
     } catch {
@@ -501,10 +507,15 @@ function WorkflowTab() {
     setLoading(true);
     try {
       const res = await a2aAgentsApi.listRemote();
-      if (res.error && !res.available) {
+      // 如果返回的是数组（即使是空数组），说明已连接
+      if (Array.isArray(res)) {
+        setRemoteAgents(res);
+        setSchedulerAvailable(true);
+      } else if (res.error && !res.available) {
         setSchedulerAvailable(false);
+        setRemoteAgents([]);
       } else {
-        setRemoteAgents(Array.isArray(res) ? res : res.data || []);
+        setRemoteAgents(Array.isArray(res.data) ? res.data : []);
         setSchedulerAvailable(true);
       }
     } catch {
