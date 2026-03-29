@@ -56,7 +56,6 @@ export async function POST(
       .from('purchase_requests')
       .update({ 
         status: 'pending',
-        submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', parseInt(id, 10))
