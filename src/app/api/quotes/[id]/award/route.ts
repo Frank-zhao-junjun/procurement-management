@@ -110,7 +110,7 @@ export async function POST(
         supplier_id: quote.supplier_id,
         supplier_snapshot: quote.supplier_snapshot,
         delivery_date: deliveryDate,
-        status: 'draft',
+        status: 'sent', // 授标后直接设为已发送
         created_by: actor,
         pr_id: sourcingTask.pr_id,
       })
@@ -225,7 +225,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      message: '授标成功，已自动创建采购订单',
+      message: '授标成功，已自动创建采购订单并发送',
       quote: {
         id: quoteId,
         quote_number: quote.quote_number,
@@ -234,7 +234,7 @@ export async function POST(
       purchaseOrder: {
         id: po.id,
         po_number: poNumber,
-        status: 'draft',
+        status: 'sent',
         supplier_name: quote.supplier_snapshot,
         delivery_date: deliveryDate,
         total_price: quote.total_price,
