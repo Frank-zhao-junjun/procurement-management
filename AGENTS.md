@@ -2,6 +2,8 @@
 
 本系统面向 Agent 设计，支持通过 HTTP API 进行全流程采购管理。
 
+> **重要**：开发前请先阅读 [API_CONTRACT.md](./API_CONTRACT.md) 了解详细的契约规范和常见问题。
+
 ## Agent-first 模型
 
 ```
