@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
+import { emitPOCreated, emitPRFAMatched } from '@/lib/events';
 
 // PUT /api/purchase-request-lines/[id]/confirm-fa - 确认 FA 匹配并创建 PO
 export async function PUT(
@@ -238,6 +239,43 @@ async function createPOFromFAMatch(
         pr_line_id: prLine.id,
       },
     });
+
+    // 发布事件
+    // 1. FA 匹配成功事件
+    emitPRFAMatched({
+      prId: prLine.request_id,
+      prNumber: '', // PR number not available here, can be queried if needed
+      prLineId: prLine.id,
+      faId: fa.id,
+      faNumber: fa.fa_number,
+      supplierId: fa.supplier_id,
+      supplierName: fa.supplier_snapshot,
+      materialId: fa.material_id,
+      materialSnapshot: fa.material_snapshot,
+      unitPrice: Number(fa.unit_price),
+      quantity: prLine.quantity,
+      matchType: 'material_id',
+      actor,
+      actorRole: role,
+    }, 'fa_confirm_create_po').catch(err => 
+      console.error('[Event] Failed to emit PR_FA_MATCHED:', err)
+    );
+
+    // 2. PO 创建事件
+    emitPOCreated({
+      poId: po.id,
+      poNumber,
+      supplierId: fa.supplier_id,
+      supplierName: fa.supplier_snapshot,
+      prId: prLine.request_id,
+      prNumber: undefined,
+      status: 'draft',
+      linesCount: 1,
+      actor,
+      actorRole: role,
+    }, 'fa_confirm_create_po').catch(err => 
+      console.error('[Event] Failed to emit PO_CREATED:', err)
+    );
 
     return { success: true, poId: po.id, poNumber };
   } catch (error: any) {

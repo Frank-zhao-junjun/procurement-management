@@ -3,7 +3,7 @@ import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
 import { getBeijingDateString, getBeijingTimeString, getBeijingISOString } from '@/lib/datetime';
-import { notifyManagers } from '@/lib/webhook';
+import { emitGRCompleted, emitGROverdelivery } from '@/lib/events';
 
 // 超收阈值（5%）
 const OVERDELIVERY_THRESHOLD = 0.05;
@@ -182,25 +182,24 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // 通知所有配置了 Webhook 的 Manager（统一 payload / 审计 / 重试）
-      notifyManagers(
-        'overdelivery_pending',
-        {
-          gr_id: gr.id,
-          gr_number: grNumber,
-          po_id: poId || poLine.order_id,
-          po_line_id: poLineId,
-          order_qty: orderQty,
-          gr_quantity: grQuantity,
-          overdelivery_ratio: overdeliveryRatio,
-          requested_by: actor,
-          requested_at: getBeijingISOString(),
-          notes: body.notes || null,
-        },
-        { entityType: 'goods_receipt', entityId: gr.id }
-      ).catch((err: Error) => {
-        console.error('Failed to notify managers via webhook:', err);
-      });
+      // 发布超收事件（通知 Manager 审批）
+      emitGROverdelivery({
+        grId: gr.id,
+        grNumber: grNumber,
+        poId: poId || poLine.order_id,
+        poNumber: poHeader?.po_number || '',
+        poLineId: poLineId,
+        materialSnapshot: poLine.material_snapshot || '',
+        orderedQty: orderQty,
+        receivedQty: newReceivedQty,
+        overdeliveryQty: newReceivedQty - orderQty,
+        overdeliveryRatio: overdeliveryRatio,
+        grStatus: 'pending_approval',
+        actor,
+        actorRole: role,
+      }, 'gr_create_overdelivery').catch(err => 
+        console.error('[Event] Failed to emit GR_OVERDELIVERY:', err)
+      );
 
       return NextResponse.json({
         data: gr,
@@ -274,6 +273,26 @@ export async function POST(request: NextRequest) {
         pending_qty: pendingQty,
       },
     });
+
+    // 发布收货完成事件
+    emitGRCompleted({
+      grId: gr.id,
+      grNumber: grNumber,
+      poId: poLine.order_id,
+      poNumber: poHeader?.po_number || '',
+      poLineId: poLineId,
+      materialSnapshot: poLine.material_snapshot || '',
+      orderedQty: orderQty,
+      receivedQty: grQuantity,
+      cumulativeReceivedQty: newReceivedQty,
+      pendingQty: pendingQty,
+      isFullyReceived: pendingQty === 0,
+      overdeliveryRatio: isOverdelivery ? overdeliveryRatio : undefined,
+      actor,
+      actorRole: role,
+    }, 'gr_create').catch(err => 
+      console.error('[Event] Failed to emit GR_COMPLETED:', err)
+    );
 
     return NextResponse.json({ data: gr }, { status: 201 });
   } catch (error: any) {

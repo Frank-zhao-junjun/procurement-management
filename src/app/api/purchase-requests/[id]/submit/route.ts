@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
-import { onPRSubmitted } from '@/lib/agent-notify';
+import { emitPRSubmitted } from '@/lib/events';
 
 /**
  * POST /api/purchase-requests/[id]/submit - 提交采购申请
@@ -76,17 +76,33 @@ export async function POST(
       detail: { previous_status: 'draft', new_status: 'pending' },
     });
 
-    // 通知 Manager Agent
-    let notifyResult = null;
+    // 发布 PR_SUBMITTED 事件（通知 Manager 审批）
+    let eventResult = null;
     try {
-      notifyResult = await onPRSubmitted(parseInt(id, 10));
-    } catch (notifyError) {
-      console.error('Failed to notify Manager Agent:', notifyError);
+      // 获取申请人信息
+      const { data: profile } = await client
+        .from('profiles')
+        .select('full_name')
+        .eq('id', existing.applicant)
+        .single();
+
+      eventResult = await emitPRSubmitted({
+        prId: parseInt(id, 10),
+        prNumber: existing.pr_number,
+        applicantId: existing.applicant,
+        applicantName: profile?.full_name || undefined,
+        totalAmount: existing.total_amount,
+        linesCount: lines?.length || 0,
+        actor,
+        actorRole: role,
+      }, 'pr_submit_api');
+    } catch (eventError) {
+      console.error('Failed to emit PR_SUBMITTED event:', eventError);
     }
 
     return NextResponse.json({ 
       data: { ...data, purchase_request_lines: lines },
-      notification: notifyResult,
+      event: eventResult,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -3,7 +3,7 @@ import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 import { getBeijingISOString } from '@/lib/datetime';
-import { notifyBuyers } from '@/lib/webhook';
+import { emitQuoteAwarded, emitPOCreated } from '@/lib/events';
 
 /**
  * POST /api/quotes/[id]/award - 授标（标记为中标）
@@ -199,29 +199,48 @@ export async function POST(
       },
     ]);
 
-    // 8. 通知所有 Buyer Agent（统一 Webhook）
-    notifyBuyers(
-      'po_created',
-      {
-        po_id: po.id,
-        po_number: poNumber,
-        supplier_name: quote.supplier_snapshot || '未知供应商',
-        delivery_date: deliveryDate,
-        quote_id: quoteId,
-        quote_number: quote.quote_number,
-        sourcing_task_id: sourcingTask.id,
-        sourcing_task_number: sourcingTask.task_number,
-        material_snapshot: quote.material_snapshot || sourcingTask.material_snapshot,
-        quantity: quote.quantity,
-        unit_price: quote.unit_price,
-        total_price: quote.total_price,
-        created_by: actor,
-        created_at: getBeijingISOString(),
+    // 8. 发布事件
+    // 8.1 发布报价单中标事件
+    emitQuoteAwarded({
+      quoteId,
+      quoteNumber: quote.quote_number,
+      sourcingTaskId: sourcingTask.id,
+      sourcingTaskNumber: sourcingTask.task_number,
+      prId: sourcingTask.pr_id,
+      prNumber: undefined,
+      supplierId: quote.supplier_id,
+      supplierName: quote.supplier_snapshot || '未知供应商',
+      materialSnapshot: quote.material_snapshot || sourcingTask.material_snapshot,
+      quantity: quote.quantity,
+      unitPrice: quote.unit_price,
+      totalPrice: quote.total_price,
+      autoPO: {
+        poId: po.id,
+        poNumber,
+        status: 'sent',
       },
-      { entityType: 'purchase_order', entityId: po.id }
-    ).catch((err: Error) => {
-      console.error('Failed to notify buyers:', err);
-    });
+      actor,
+      actorRole: role,
+    }, 'quote_award_api').catch(err => 
+      console.error('[Event] Failed to emit QUOTE_AWARDED:', err)
+    );
+
+    // 8.2 发布 PO 创建事件
+    emitPOCreated({
+      poId: po.id,
+      poNumber,
+      supplierId: quote.supplier_id,
+      supplierName: quote.supplier_snapshot || '未知供应商',
+      prId: sourcingTask.pr_id,
+      prNumber: undefined,
+      status: 'sent',
+      deliveryDate,
+      linesCount: 1,
+      actor,
+      actorRole: role,
+    }, 'quote_award_auto_create').catch(err => 
+      console.error('[Event] Failed to emit PO_CREATED:', err)
+    );
 
     return NextResponse.json({
       success: true,

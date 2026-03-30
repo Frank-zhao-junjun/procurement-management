@@ -10,7 +10,73 @@
 
 - **Agent 优先**：每个 Agent 有唯一 `agent_id` 和固定 `role`
 - **角色固定**：`requester` / `buyer` / `manager`
-- **Webhook 通知**：各角色可配置 `webhookUrl` 接收业务事件（唯一主通道）
+- **事件驱动**：通过 Webhook 订阅业务事件（统一通知通道）
+
+## 事件驱动架构
+
+系统采用事件驱动架构，通过 Webhook 向订阅者推送业务事件。
+
+### 事件类型
+
+| 事件 | 说明 | 订阅角色 |
+|------|------|----------|
+| `pr_submitted` | 采购申请提交 | Manager |
+| `pr_approved` / `pr_rejected` | 采购申请审批结果 | Buyer, Requester |
+| `pr_fa_matched` | FA 匹配成功 | Buyer |
+| `pr_fa_match_failed` | FA 匹配失败 | Buyer |
+| `sourcing_task_created` | 寻源任务创建 | Buyer |
+| `quote_awarded` | 报价单中标 | Buyer |
+| `po_created` | 采购订单创建 | Buyer |
+| `gr_completed` | 收货完成（正常） | Buyer |
+| `gr_overdelivery` | 收货超收（>5%） | Manager |
+
+### 订阅规则
+
+```
+Buyer 订阅：
+- pr_approved → 执行 FA 匹配
+- pr_fa_matched → 创建 PO（基于 FA）
+- pr_fa_match_failed → 创建寻源任务
+- quote_awarded → 创建 PO（基于报价单）
+- gr_completed → 推送收货信息
+
+Manager 订阅：
+- pr_submitted → 提示审批 PR
+- gr_overdelivery → 执行超收审批
+```
+
+### Webhook Payload 格式
+
+```json
+{
+  "schema_version": "1.0",
+  "event": "pr_approved",
+  "event_id": "uuid-v4",
+  "timestamp": "2025-04-01T10:30:00+08:00",
+  "source": "pr_approve_api",
+  "data": {
+    "entity_type": "purchase_request",
+    "entity_id": 1,
+    "pr_id": 1,
+    "pr_number": "PR-20250401-01",
+    "approved": true,
+    ...
+  },
+  "subscriber": {
+    "agent_id": "my-buyer-agent",
+    "role": "buyer"
+  }
+}
+```
+
+### 事件日志
+
+所有事件发送记录保存在 `event_logs` 表：
+- `event_id`: 事件唯一标识
+- `event_type`: 事件类型
+- `source`: 事件来源 API
+- `subscribers_notified`: 通知的订阅者数量
+- `success`: 分发是否成功
 
 ## 快速开始
 

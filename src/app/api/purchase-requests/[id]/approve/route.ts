@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
-import { notifyManagers, sendWebhook, getAgentWebhookUrl } from '@/lib/webhook';
-import { onPRApproved } from '@/lib/agent-notify';
+import { emitPRApproved, emitSourcingTaskCreated, emitPOCreated } from '@/lib/events';
 
 // POST /api/purchase-requests/[id]/approve - 审批采购申请
 export async function POST(
@@ -111,83 +110,67 @@ export async function POST(
 
     const result = { ...fullPR, purchase_request_lines: lines };
 
-    // ========== Webhook 通知 ==========
+    // ========== 事件发布 ==========
     
-    // 1. 通知需求方（PR 创建人）- Webhook 为主
-    const requesterWebhook = await getAgentWebhookUrl(existing.applicant);
-    if (requesterWebhook) {
-      const requesterEvent = approved ? 'pr_approved' : 'pr_rejected';
-      const requesterPayload = {
-        pr_id: existing.id,
-        pr_number: existing.pr_number,
-        status: newStatus,
-        approved_by: actor,
-        approved_at: new Date().toISOString(),
-        note: body.note || null,
-        // 批准时附带结果
-        ...(approved && {
-          auto_created_pos: approvalResult.autoPOs.map(po => ({
-            po_id: po.id,
-            po_number: po.po_number,
-            supplier_name: po.supplier_snapshot,
-          })),
-          sourcing_tasks: approvalResult.sourcingTasks.map(sc => ({
-            task_id: sc.id,
-            task_number: sc.task_number,
-            material_snapshot: sc.material_snapshot,
-          })),
-          fa_matches: approvalResult.faMatches.map(fa => ({
-            fa_id: fa.id,
-            fa_number: fa.fa_number,
-            supplier_name: fa.supplier_snapshot,
-          })),
-        }),
-      };
-      
-      // 异步发送，不阻塞返回
-      sendWebhook(requesterWebhook, requesterEvent, requesterPayload, {
-        entityType: 'purchase_request',
-        entityId: existing.id,
-      }).catch(err => console.error('[Webhook] Failed to notify requester:', err));
+    // 1. 发布 PR_APPROVED 事件（通知 Buyer 执行 FA 匹配，通知 Manager 审批完成）
+    emitPRApproved({
+      prId: existing.id,
+      prNumber: existing.pr_number,
+      approved,
+      approverId: actor,
+      approverName: undefined,
+      note: body.note,
+      faMatches: approvalResult.faMatches,
+      sourcingTasks: approvalResult.sourcingTasks,
+      autoPOs: approvalResult.autoPOs,
+      actor,
+      actorRole: role,
+    }, 'pr_approve_api').catch(err => console.error('[Event] Failed to emit PR_APPROVED:', err));
+
+    // 2. 发布寻源任务创建事件
+    for (const task of approvalResult.sourcingTasks) {
+      emitSourcingTaskCreated({
+        taskId: task.id,
+        taskNumber: task.task_number,
+        prId: existing.id,
+        prNumber: existing.pr_number,
+        prLineId: task.pr_line_id,
+        materialSnapshot: task.material_snapshot,
+        requirementText: task.requirement_text || task.material_snapshot,
+        status: 'pending',
+        actor: 'system',
+        actorRole: 'system',
+      }, 'pr_approve_auto_create').catch(err => 
+        console.error('[Event] Failed to emit SOURCING_TASK_CREATED:', err)
+      );
     }
 
-    // 2. 通知所有 Manager（摘要）
-    const managerNotification = await onPRApproved(existing.id, approved, approvalResult);
-    
-    // 3. 如果创建了 PO 或寻源任务，通知 Buyer
-    if (approvalResult.autoPOs.length > 0 || approvalResult.sourcingTasks.length > 0) {
-      // 查询 Buyer 的 Webhook
-      const { data: buyers } = await client
-        .from('agent_bindings')
-        .select('webhook_url, agent_id')
-        .eq('role', 'buyer')
-        .not('webhook_url', 'is', null);
-
-      for (const buyer of buyers || []) {
-        if (buyer.webhook_url) {
-          sendWebhook(buyer.webhook_url, 'pr_processing_task', {
-            pr_id: existing.id,
-            pr_number: existing.pr_number,
-            created_pos: approvalResult.autoPOs.map(po => ({
-              po_id: po.id,
-              po_number: po.po_number,
-            })),
-            sourcing_tasks: approvalResult.sourcingTasks.map(sc => ({
-              task_id: sc.id,
-              task_number: sc.task_number,
-            })),
-          }, {
-            entityType: 'purchase_request',
-            entityId: existing.id,
-          }).catch(err => console.error('[Webhook] Failed to notify buyer:', err));
-        }
-      }
+    // 3. 发布 PO 创建事件
+    for (const po of approvalResult.autoPOs) {
+      emitPOCreated({
+        poId: po.id,
+        poNumber: po.po_number,
+        supplierId: po.supplier_id,
+        supplierName: po.supplier_snapshot,
+        prId: existing.id,
+        prNumber: existing.pr_number,
+        status: 'draft',
+        linesCount: 1,
+        actor: 'system',
+        actorRole: 'system',
+      }, 'pr_approve_auto_create').catch(err => 
+        console.error('[Event] Failed to emit PO_CREATED:', err)
+      );
     }
 
     return NextResponse.json({ 
       data: result,
       approval: approvalResult,
-      notification_sent: !!requesterWebhook,
+      events_published: {
+        pr_approved: true,
+        sourcing_tasks: approvalResult.sourcingTasks.length,
+        auto_pos: approvalResult.autoPOs.length,
+      },
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

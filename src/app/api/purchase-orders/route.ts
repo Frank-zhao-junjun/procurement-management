@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
-import { onPOCreated } from '@/lib/agent-notify';
+import { emitPOCreated } from '@/lib/events';
 
 // GET /api/purchase-orders - 获取采购订单列表
 export async function GET(request: NextRequest) {
@@ -195,13 +195,30 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('order_id', po.id);
 
-    // 通知相关 Agent（异步，不阻塞返回）
-    let notifyResult = null;
-    try {
-      notifyResult = await onPOCreated(po.id);
-    } catch (notifyError) {
-      console.error('Failed to notify Agent:', notifyError);
-    }
+    // 发布 PO 创建事件（异步，不阻塞返回）
+    emitPOCreated({
+      poId: po.id,
+      poNumber: poNumber,
+      supplierId: supplierId,
+      supplierName: supplierSnapshot,
+      prId: prId,
+      prNumber: undefined,
+      status: 'draft',
+      deliveryDate: deliveryDate,
+      linesCount: orderLines.length,
+      lines: poLines?.map((line: any, index: number) => ({
+        line_id: line.id,
+        line_number: index + 1,
+        material_snapshot: line.material_snapshot,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        total_price: line.total_price,
+      })),
+      actor,
+      actorRole: role,
+    }, 'po_create_api').catch(err => 
+      console.error('[Event] Failed to emit PO_CREATED:', err)
+    );
 
     return NextResponse.json({ 
       success: true,
@@ -209,7 +226,6 @@ export async function POST(request: NextRequest) {
         ...fullPo,
         lines: poLines || [],
       },
-      notification: notifyResult,
     }, { status: 201 });
   } catch (error: any) {
     console.error('PO创建异常:', error);
