@@ -406,7 +406,14 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string): 
         fa_id: item.fa.id,
       }));
 
-      await client.from('purchase_order_lines').insert(poLines);
+      const { error: linesError } = await client.from('purchase_order_lines').insert(poLines);
+      
+      if (linesError) {
+        console.error('Error inserting PO lines:', linesError);
+        // 回滚：删除已创建的 PO 头
+        await client.from('purchase_orders').delete().eq('id', po.id);
+        continue;
+      }
 
       for (const item of supplierLines) {
         await client
