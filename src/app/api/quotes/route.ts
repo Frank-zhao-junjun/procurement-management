@@ -66,7 +66,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建报价单' }, { status: 403 });
     }
 
-    const parsed = insertQuoteSchema.safeParse(body);
+    // 转换数字为字符串（适配 decimal schema）
+    const normalizedBody = {
+      ...body,
+      unitPrice: body.unitPrice != null ? String(body.unitPrice) : undefined,
+      quantity: body.quantity != null ? String(body.quantity) : undefined,
+    };
+
+    const parsed = insertQuoteSchema.safeParse(normalizedBody);
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'Invalid input', details: parsed.error.issues },
@@ -91,6 +98,7 @@ export async function POST(request: NextRequest) {
 
     const quoteNumber = await numberGenerators.quote();
 
+    // 确保数量和单价为数字类型
     const quantity = Number(parsed.data.quantity || '0');
     const unitPrice = Number(parsed.data.unitPrice || '0');
     const totalPrice = quantity * unitPrice;
