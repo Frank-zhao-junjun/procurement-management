@@ -123,16 +123,16 @@ export function filterPurchaseOrders(query: any, role: Role, actor: string) {
 export function filterSourcingTasks(query: any, role: Role, actor: string) {
   switch (role) {
     case 'requester':
-      // 需求人不能直接看寻源任务
-      return query.eq('id', -1); // 返回空结果
+      // 需求人可以看到自己 PR 关联的寻源任务
+      return query.eq('pr_id', -1); // 占位，下面动态设置
     case 'buyer':
       // 采购人可以看到所有
       return query;
     case 'manager':
-      // 审批人不能直接看寻源任务
-      return query.eq('id', -1);
+      // 审批人可以看所有
+      return query;
     default:
-      return query.eq('id', -1);
+      return query.eq('id', -1); // 返回空结果
   }
 }
 

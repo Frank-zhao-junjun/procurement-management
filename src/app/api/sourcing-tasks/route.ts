@@ -33,6 +33,37 @@ export async function GET(request: NextRequest) {
     // 按角色过滤
     query = filterSourcingTasks(query, role as Role, actor);
 
+    // Requester 角色：需要额外过滤，只看自己 PR 关联的任务
+    if (role === 'requester') {
+      // 先查询 requester 自己的 PR IDs
+      const { data: ownPRs } = await client
+        .from('purchase_requests')
+        .select('id')
+        .eq('applicant', actor);
+
+      const ownPRIds = ownPRs?.map((pr: any) => pr.id) || [];
+      if (ownPRIds.length > 0) {
+        query = client
+          .from('sourcing_tasks')
+          .select('*', { count: 'exact' })
+          .in('pr_id', ownPRIds)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + pageSize - 1);
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+      } else {
+        // 没有自己的 PR，返回空
+        return NextResponse.json({
+          data: [],
+          total: 0,
+          page,
+          pageSize,
+        });
+      }
+    }
+
     const { data, error, count } = await query;
 
     if (error) {
