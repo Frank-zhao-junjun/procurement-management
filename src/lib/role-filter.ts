@@ -17,18 +17,25 @@ export type UserRole = 'requester' | 'buyer' | 'manager';
 /**
  * 获取用户身份与角色（Agent-first）
  * 
- * 1. 优先使用显式传递的 X-Role
- * 2. 否则从 agent_bindings 表查询 X-Actor 对应的 role
- * 3. 都未提供则默认 requester
+ * 1. 先从 agent_bindings 表查询 X-Actor 对应的 role（权威来源）
+ * 2. 如果表中有记录，使用表中的角色（忽略 X-Role）
+ * 3. 如果表中无记录，使用显式传递的 X-Role
+ * 4. 都未提供则默认 requester
  */
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
   const actor = request.headers.get('X-Actor') || 'anonymous';
-  let role = request.headers.get('X-Role') as UserRole | null;
+  const explicitRole = request.headers.get('X-Role') as UserRole | null;
 
-  // 如果未显式传递角色，从 agent_bindings 查询
-  if (!role) {
-    role = await resolveRoleByAgentId(actor);
+  // 优先从 agent_bindings 表查询（权威来源）
+  const bindingRole = await resolveRoleByAgentId(actor);
+  
+  // 如果 agent_bindings 中有记录，使用表中的角色（不可被前端覆盖）
+  if (bindingRole) {
+    return { actor, role: bindingRole };
   }
+
+  // 如果表中无记录，使用显式传递的角色
+  let role = explicitRole;
 
   // 验证角色有效性
   if (!role || !['requester', 'buyer', 'manager'].includes(role)) {
