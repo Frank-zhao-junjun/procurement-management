@@ -362,7 +362,7 @@ async function createAutoPO(client: any, pr: any, lines: any[], actor: string): 
           supplier_id: supplierId,
           supplier_snapshot: supplierName,
           pr_id: pr.id,
-          status: 'draft',
+          status: 'sent', // 框架协议匹配直接设为已发送，无需再发送
           created_by: actor,
         })
         .select()
