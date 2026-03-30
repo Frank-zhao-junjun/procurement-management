@@ -137,17 +137,6 @@ export async function POST(request: NextRequest) {
       isOverdelivery = overdeliveryRatio > OVERDELIVERY_THRESHOLD;
     }
 
-    // 构建快照数据（如果 PO 头存在）
-    let poSnapshot: string | null = null;
-    if (poHeader) {
-      poSnapshot = poHeader.po_number;
-    }
-    
-    let poLineSnapshot: string | null = null;
-    if (poLine.material_snapshot) {
-      poLineSnapshot = poLine.material_snapshot;
-    }
-
     // 如果超收且当前角色不是 manager，需要审批
     if (isOverdelivery && role !== 'manager') {
       // 插入待审批的收货单
@@ -220,21 +209,7 @@ export async function POST(request: NextRequest) {
       }, { status: 202 });
     }
 
-    // 正常更新 PO 行
-    await client
-      .from('purchase_order_lines')
-      .update({
-        received_qty: newReceivedQty,
-        pending_qty: pendingQty,
-        status: pendingQty === 0 ? 'received' : (newReceivedQty > 0 ? 'partial_received' : 'ordered'),
-        updated_at: getBeijingISOString(),
-      })
-      .eq('id', poLineId);
-
-    // 检查是否需要更新 PO 头状态
-    await updatePOStatus(client, poLine.order_id);
-
-    // 插入收货单
+    // 先创建收货单，再更新 PO 行（保证原子性）
     const { data: gr, error: grError } = await client
       .from('goods_receipts')
       .insert({
@@ -254,6 +229,20 @@ export async function POST(request: NextRequest) {
     if (grError) {
       return NextResponse.json({ error: grError.message }, { status: 500 });
     }
+
+    // 收货单创建成功后，更新 PO 行
+    await client
+      .from('purchase_order_lines')
+      .update({
+        received_qty: newReceivedQty,
+        pending_qty: pendingQty,
+        status: pendingQty === 0 ? 'received' : (newReceivedQty > 0 ? 'partial_received' : 'ordered'),
+        updated_at: getBeijingISOString(),
+      })
+      .eq('id', poLineId);
+
+    // 检查是否需要更新 PO 头状态
+    await updatePOStatus(client, poLine.order_id);
 
     // 更新 PR 行进度
     if (poLine.pr_line_id) {
