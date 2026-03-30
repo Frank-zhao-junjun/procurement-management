@@ -88,8 +88,8 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    if (role !== 'buyer' && role !== 'manager') {
-      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建寻源任务' }, { status: 403 });
+    if (role !== 'buyer') {
+      return NextResponse.json({ error: '只有 Buyer 可以创建寻源任务' }, { status: 403 });
     }
 
     const parsed = insertSourcingTaskSchema.safeParse(body);
