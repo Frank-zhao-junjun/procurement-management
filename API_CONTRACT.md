@@ -169,22 +169,41 @@ const prId = body.prId; // 如果前端传 pr_id 就获取不到
 | `POST /api/agent-actions/create-pr-from-material-check` | 检查物料、必要时自动补充确认并创建 PR，可选自动提交 | requester / buyer agent |
 | `POST /api/agent-actions/approve-pr-and-handle-fa` | 审批 PR，并自动执行 FA 匹配/寻源/自动建 PO | manager agent |
 | `POST /api/agent-actions/create-po-from-awarded-quote` | 授标报价单并自动创建 PO | buyer agent |
+| `POST /api/agent-actions/confirm-fa-and-create-po` | 确认或拒绝 FA 匹配，必要时自动建 PO 或创建寻源任务 | buyer agent |
+| `POST /api/agent-actions/receive-goods-and-handle-overdelivery` | 创建收货单，并在超收时自动返回待审批结果 | buyer / manager agent |
+| `POST /api/agent-actions/submit-contract-for-approval` | 提交框架协议进入审批并通知 manager | buyer / manager agent |
 
 ### 错误处理约定
 
 ```typescript
-// ✅ 动作接口应返回面向任务的结果，而不是只返回单表写入结果
+// ✅ 动作接口应返回统一 envelope，而不是只返回单表写入结果
 {
   "success": true,
-  "purchaseOrder": {...},
-  "quote": {...}
+  "action": "create-po-from-awarded-quote",
+  "data": {
+    "purchaseOrder": {...},
+    "quote": {...}
+  },
+  "nextActions": [
+    {
+      "action": "receive-goods-and-handle-overdelivery",
+      "reason": "PO 已生成，可继续执行收货"
+    }
+  ],
+  "warnings": []
 }
 
-// ✅ 对需要 Agent 决策的场景，返回 requiresConfirmation 而非直接失败
+// ✅ 对需要 Agent 决策的场景，放在 data 内返回明确状态，而非直接失败
 {
-  "created": false,
-  "requiresConfirmation": true,
-  "unresolvedLines": [...]
+  "success": true,
+  "action": "create-pr-from-material-check",
+  "data": {
+    "created": false,
+    "requiresConfirmation": true,
+    "unresolvedLines": [...]
+  },
+  "nextActions": [...],
+  "warnings": [...]
 }
 ```
 

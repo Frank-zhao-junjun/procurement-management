@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       { quoteId },
     );
 
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(result, { status: result.statusCode || 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     const status =

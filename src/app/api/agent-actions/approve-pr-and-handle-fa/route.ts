@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: result.statusCode || 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     const status = message.includes('只有 Manager') ? 403 : message.includes('not found') ? 404 : 400;

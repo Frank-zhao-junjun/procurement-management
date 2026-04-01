@@ -257,6 +257,81 @@ POST /api/agent-actions/create-po-from-awarded-quote
   - 创建 PO 与 PO 行
   - 更新寻源任务、PR 行状态
 
+### 4. 确认 FA 并自动创建 PO
+
+```bash
+POST /api/agent-actions/confirm-fa-and-create-po
+{
+  "prLineId": 23,
+  "faId": 5,
+  "confirmed": true,
+  "autoCreatePO": true
+}
+```
+
+**行为说明**：
+- 仅 Buyer / Manager 可调用
+- `confirmed=true` 时确认 FA 匹配，并可自动创建 PO
+- `confirmed=false` 时拒绝 FA 匹配，并自动创建寻源任务
+
+### 5. 收货并自动处理超收
+
+```bash
+POST /api/agent-actions/receive-goods-and-handle-overdelivery
+{
+  "poLineId": 7,
+  "quantity": 110,
+  "receiptDate": "2026-04-01",
+  "notes": "首次到货"
+}
+```
+
+**行为说明**：
+- 仅 Buyer / Manager 可调用
+- 正常收货时直接更新 GR / PO 行 / PR 行
+- 超收超过阈值时，自动创建待审批 GR，并返回下一步动作提示
+- 若传入 `goodsReceiptId` + `approved`，则可直接作为 Manager 审批超收
+
+### 6. 提交合同审批
+
+```bash
+POST /api/agent-actions/submit-contract-for-approval
+{
+  "contractId": 3
+}
+```
+
+**行为说明**：
+- 提交草稿合同进入 `pending`
+- 自动写审计日志
+- 自动通知 Manager Agent
+
+### 统一响应格式
+
+所有 Agent 高层动作接口统一返回：
+
+```json
+{
+  "success": true,
+  "action": "approve-pr-and-handle-fa",
+  "data": {},
+  "nextActions": [
+    {
+      "action": "confirm-fa-and-create-po",
+      "reason": "存在待确认 FA 匹配，请继续处理"
+    }
+  ],
+  "warnings": []
+}
+```
+
+字段说明：
+- `success`: 动作是否成功
+- `action`: 当前执行的高层动作名
+- `data`: 动作结果主体
+- `nextActions`: 推荐给 Agent 的下一步动作
+- `warnings`: 非阻塞告警（如超收待审批）
+
 ### 0. 物料匹配检查（推荐第一步）
 
 **重要**：在创建采购申请前，建议先检查物料匹配情况，避免后续流程中断。

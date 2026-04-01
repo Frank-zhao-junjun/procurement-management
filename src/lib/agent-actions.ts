@@ -6,9 +6,12 @@ import {
   emitPRFAMatched,
   emitPRSubmitted,
   emitQuoteAwarded,
+  emitGRCompleted,
+  emitGROverdelivery,
   emitSourcingTaskCreated,
 } from '@/lib/events';
 import { canApprove, canCreatePO, type Role } from '@/lib/role-filter';
+import { onContractPending } from '@/lib/agent-notify';
 
 type DBClient = {
   from: (table: string) => any;
@@ -66,6 +69,71 @@ type ApprovePrInput = {
 type CreatePoFromAwardedQuoteInput = {
   quoteId: number;
 };
+
+type ConfirmFAAndCreatePOInput = {
+  prLineId: number;
+  confirmed?: boolean;
+  faId?: number;
+  autoCreatePO?: boolean;
+};
+
+type ReceiveGoodsAndHandleOverdeliveryInput = {
+  poLineId: number;
+  poId?: number;
+  quantity: number;
+  grType?: 'in' | 'out';
+  receiptDate?: string;
+  notes?: string;
+  autoApproveOverdelivery?: boolean;
+  overdeliveryApproval?: boolean;
+  approvalNote?: string;
+};
+
+type SubmitContractForApprovalInput = {
+  contractId: number;
+};
+
+type AgentActionName =
+  | 'create-pr-from-material-check'
+  | 'approve-pr-and-handle-fa'
+  | 'create-po-from-awarded-quote'
+  | 'confirm-fa-and-create-po'
+  | 'receive-goods-and-handle-overdelivery'
+  | 'submit-contract-for-approval';
+
+type AgentActionNextStep = {
+  action: string;
+  reason: string;
+};
+
+type AgentActionEnvelope<T> = {
+  success: boolean;
+  action: AgentActionName;
+  data: T;
+  nextActions: AgentActionNextStep[];
+  warnings: string[];
+  statusCode?: number;
+};
+
+function makeActionResponse<T>(
+  action: AgentActionName,
+  data: T,
+  options: {
+    success?: boolean;
+    nextActions?: AgentActionNextStep[];
+    warnings?: string[];
+    statusCode?: number;
+  } = {},
+): AgentActionEnvelope<T> {
+  return {
+    success: options.success ?? true,
+    action,
+    data,
+    nextActions: options.nextActions ?? [],
+    warnings: options.warnings ?? [],
+    statusCode: options.statusCode,
+  };
+}
 
 function normalizeText(text: string): string {
   return text
@@ -665,7 +733,7 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
 export async function createPRFromMaterialCheck(
   ctx: ActionContext,
   input: CreatePrFromMaterialCheckInput,
-) {
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
   const checkResult = await checkMaterials(ctx.client, input.lines);
 
   const resolvedLines = input.lines.map((line, index) => {
@@ -708,13 +776,17 @@ export async function createPRFromMaterialCheck(
     }));
 
   if (unresolvedLines.length > 0) {
-    return {
+    const data = {
       created: false,
       requiresConfirmation: true,
       materialCheck: checkResult,
       unresolvedLines,
       message: '存在需要确认的物料，未创建采购申请',
     };
+    return wrapActionResult('create-pr-from-material-check', data, {
+      nextActions: inferNextActions('create-pr-from-material-check', data),
+      warnings: ['存在需确认物料，当前未创建采购申请'],
+    });
   }
 
   const creationResult = await createPurchaseRequestWithResolvedMaterials(
@@ -725,10 +797,14 @@ export async function createPRFromMaterialCheck(
   );
 
   if (!creationResult.created) {
-    return {
+    const data = {
       ...creationResult,
       materialCheck: checkResult,
     };
+    return wrapActionResult('create-pr-from-material-check', data, {
+      nextActions: inferNextActions('create-pr-from-material-check', data),
+      warnings: creationResult.message ? [creationResult.message] : [],
+    });
   }
 
   let submitResult = null;
@@ -736,16 +812,22 @@ export async function createPRFromMaterialCheck(
     submitResult = await submitPurchaseRequest(ctx, creationResult.data.id);
   }
 
-  return {
+  const data = {
     created: true,
     materialCheck: checkResult,
     purchaseRequest: creationResult.data,
     submitted: !!submitResult?.submitted,
     submission: submitResult,
   };
+  return wrapActionResult('create-pr-from-material-check', data, {
+    nextActions: inferNextActions('create-pr-from-material-check', data),
+  });
 }
 
-export async function approvePRAndHandleFA(ctx: ActionContext, input: ApprovePrInput) {
+export async function approvePRAndHandleFA(
+  ctx: ActionContext,
+  input: ApprovePrInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
   if (!canApprove(ctx.role)) {
     throw new Error('只有 Manager 可以审批采购申请');
   }
@@ -879,7 +961,7 @@ export async function approvePRAndHandleFA(ctx: ActionContext, input: ApprovePrI
     ).catch((error) => console.error('[AgentAction] Failed to emit PO_CREATED:', error));
   }
 
-  return {
+  const data = {
     data: {
       ...fullPR,
       purchase_request_lines: lines || [],
@@ -891,12 +973,15 @@ export async function approvePRAndHandleFA(ctx: ActionContext, input: ApprovePrI
       auto_pos: approvalResult.autoPOs.length,
     },
   };
+  return wrapActionResult('approve-pr-and-handle-fa', data, {
+    nextActions: inferNextActions('approve-pr-and-handle-fa', data),
+  });
 }
 
 export async function createPOFromAwardedQuote(
   ctx: ActionContext,
   input: CreatePoFromAwardedQuoteInput,
-) {
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
   if (!canCreatePO(ctx.role)) {
     throw new Error('只有 Buyer 或 Manager 可以授标');
   }
@@ -930,7 +1015,7 @@ export async function createPOFromAwardedQuote(
       .limit(1)
       .single();
 
-    return {
+    const data = {
       success: true,
       alreadyAwarded: true,
       quote: {
@@ -940,6 +1025,10 @@ export async function createPOFromAwardedQuote(
       },
       purchaseOrderLine: existingPoLine || null,
     };
+    return wrapActionResult('create-po-from-awarded-quote', data, {
+      nextActions: inferNextActions('create-po-from-awarded-quote', data),
+      warnings: ['报价单已授标，返回现有订单线索'],
+    });
   }
 
   const sourcingTask = quote.sourcing_tasks;
@@ -1112,7 +1201,7 @@ export async function createPOFromAwardedQuote(
     'agent_action_quote_award',
   ).catch((error) => console.error('[AgentAction] Failed to emit PO_CREATED:', error));
 
-  return {
+  const data = {
     success: true,
     quote: {
       id: input.quoteId,
@@ -1128,6 +1217,9 @@ export async function createPOFromAwardedQuote(
       total_price: quote.total_price,
     },
   };
+  return wrapActionResult('create-po-from-awarded-quote', data, {
+    nextActions: inferNextActions('create-po-from-awarded-quote', data),
+  });
 }
 
 export async function createActionContext(client: any, request: Request): Promise<ActionContext> {
@@ -1137,4 +1229,707 @@ export async function createActionContext(client: any, request: Request): Promis
     actor: identity.actor,
     role: identity.role,
   };
+}
+
+function wrapActionResult<T>(
+  action: AgentActionName,
+  data: T,
+  options: {
+    nextActions?: AgentActionNextStep[];
+    warnings?: string[];
+  } = {},
+): AgentActionEnvelope<T> {
+  return {
+    success: true,
+    action,
+    data,
+    nextActions: options.nextActions || [],
+    warnings: options.warnings || [],
+  };
+}
+
+function inferNextActions(action: string, data: any): AgentActionNextStep[] {
+  switch (action) {
+    case 'create-pr-from-material-check':
+      if (data?.requiresConfirmation) {
+        return [
+          {
+            action: 'confirm-fa-and-create-po',
+            reason: '仍有物料需要确认，补充 confirmedMaterialId/confirmedMaterialName 后重试创建 PR',
+          },
+        ];
+      }
+      if (data?.submitted) {
+        return [
+          {
+            action: 'approve-pr-and-handle-fa',
+            reason: 'PR 已提交，等待 manager agent 审批并触发后续 FA/寻源/PO 流程',
+          },
+        ];
+      }
+      return [
+        {
+          action: 'submit-pr',
+          reason: 'PR 已创建但未提交，可继续提交进入审批流',
+        },
+      ];
+    case 'approve-pr-and-handle-fa':
+      if (data?.approval?.faMatches?.some((match: any) => match.requires_confirmation)) {
+        return [
+          {
+            action: 'confirm-fa-and-create-po',
+            reason: '存在待确认 FA 匹配，请按 prLineId + faId 继续确认',
+          },
+        ];
+      }
+      if ((data?.approval?.sourcingTasks?.length || 0) > 0) {
+        return [
+          {
+            action: 'create-po-from-awarded-quote',
+            reason: '已生成寻源任务，后续报价授标后可自动创建 PO',
+          },
+        ];
+      }
+      return [];
+    case 'confirm-fa-and-create-po':
+      if (data?.poCreated) {
+        return [
+          {
+            action: 'receive-goods-and-handle-overdelivery',
+            reason: 'PO 已创建，可继续执行收货动作',
+          },
+        ];
+      }
+      if (data?.sourcingTaskCreated) {
+        return [
+          {
+            action: 'create-po-from-awarded-quote',
+            reason: '已创建寻源任务，报价授标后可自动创建 PO',
+          },
+        ];
+      }
+      return [];
+    case 'create-po-from-awarded-quote':
+      return [
+        {
+          action: 'receive-goods-and-handle-overdelivery',
+          reason: 'PO 已生成，可继续执行收货并自动处理超收',
+        },
+      ];
+    case 'receive-goods-and-handle-overdelivery':
+      if (data?.requiresApproval && data?.goodsReceipt?.id) {
+        return [
+          {
+            action: 'approve-overdelivery',
+            reason: '收货超收超过阈值，等待 manager agent 审批超收',
+          },
+        ];
+      }
+      return [];
+    case 'submit-contract-for-approval':
+      return [];
+    default:
+      return [];
+  }
+}
+
+export async function confirmFAAndCreatePO(
+  ctx: ActionContext,
+  input: ConfirmFAAndCreatePOInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
+  if (!canCreatePO(ctx.role)) {
+    throw new Error('只有 Buyer 或 Manager 可以确认 FA 并创建 PO');
+  }
+
+  const { data: prLine, error: lineError } = await ctx.client
+    .from('purchase_request_lines')
+    .select('*, purchase_requests(*)')
+    .eq('id', input.prLineId)
+    .single();
+
+  if (lineError || !prLine) {
+    throw new Error(lineError?.message || 'PR line not found');
+  }
+
+  if (input.confirmed === false) {
+    const taskNumber = await numberGenerators.sc();
+    await ctx.client
+      .from('purchase_request_lines')
+      .update({
+        match_confirm: 'rejected',
+        matched_fa_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.prLineId);
+
+    const { data: sourcingTask, error: scError } = await ctx.client
+      .from('sourcing_tasks')
+      .insert({
+        task_number: taskNumber,
+        pr_id: prLine.request_id,
+        pr_line_id: prLine.id,
+        material_id: null,
+        material_snapshot: prLine.requirement_text,
+        requirement_text: prLine.requirement_text,
+        status: 'pending',
+        created_by: ctx.actor,
+      })
+      .select()
+      .single();
+
+    if (scError) {
+      throw new Error(scError.message);
+    }
+
+    await ctx.client
+      .from('purchase_request_lines')
+      .update({
+        progress: 'sourced',
+        sourcing_task_id: sourcingTask.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.prLineId);
+
+    await ctx.client.from('audit_logs').insert({
+      entity_type: 'purchase_request_line',
+      entity_id: input.prLineId,
+      action: 'reject_fa_create_sc',
+      actor: ctx.actor,
+      actor_role: ctx.role,
+      detail: {
+        sourcing_task_id: sourcingTask.id,
+        task_number: taskNumber,
+        created_by_agent_action: true,
+      },
+    });
+
+    const data = {
+      prLineId: input.prLineId,
+      confirmed: false,
+      sourcingTaskCreated: true,
+      sourcingTask,
+    };
+
+    return wrapActionResult('confirm-fa-and-create-po', data, {
+      nextActions: inferNextActions('confirm-fa-and-create-po', data),
+    });
+  }
+
+  const targetFaId = input.faId || prLine.matched_fa_id;
+  if (!targetFaId) {
+    throw new Error('No FA matched. Please match first.');
+  }
+
+  const { data: fa, error: faError } = await ctx.client
+    .from('framework_agreements')
+    .select('*')
+    .eq('id', targetFaId)
+    .single();
+
+  if (faError || !fa) {
+    throw new Error(faError?.message || 'FA not found');
+  }
+
+  await ctx.client
+    .from('purchase_request_lines')
+    .update({
+      progress: 'matched_protocol',
+      material_id: fa.material_id,
+      material_snapshot: fa.material_snapshot,
+      match_confirm: 'confirmed',
+      matched_fa_id: targetFaId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.prLineId);
+
+  await ctx.client.from('audit_logs').insert({
+    entity_type: 'purchase_request_line',
+    entity_id: input.prLineId,
+    action: 'confirm_fa',
+    actor: ctx.actor,
+    actor_role: ctx.role,
+    detail: {
+      fa_id: targetFaId,
+      fa_number: fa.fa_number,
+      unit_price: fa.unit_price,
+      created_by_agent_action: true,
+    },
+  });
+
+  let poCreated = false;
+  let poResult: { success: boolean; poId?: number; poNumber?: string; error?: string } | null = null;
+
+  if (input.autoCreatePO !== false) {
+    const poNumber = await numberGenerators.po();
+    const deliveryDate = prLine.expected_delivery_date ?? prLine.expectedDeliveryDate ?? null;
+
+    const { data: po, error: poError } = await ctx.client
+      .from('purchase_orders')
+      .insert({
+        po_number: poNumber,
+        supplier_id: fa.supplier_id,
+        supplier_snapshot: fa.supplier_snapshot,
+        delivery_date: deliveryDate,
+        status: 'draft',
+        created_by: ctx.actor,
+      })
+      .select()
+      .single();
+
+    if (poError || !po) {
+      throw new Error(poError?.message || 'Failed to create PO');
+    }
+
+    const { error: lineInsertError } = await ctx.client
+      .from('purchase_order_lines')
+      .insert({
+        order_id: po.id,
+        line_number: 1,
+        pr_id: prLine.request_id,
+        pr_line_id: prLine.id,
+        material_id: fa.material_id,
+        material_snapshot: fa.material_snapshot,
+        quantity: prLine.quantity,
+        unit_price: fa.unit_price,
+        total_price: Number(fa.unit_price) * Number(prLine.quantity),
+        received_qty: 0,
+        pending_qty: prLine.quantity,
+        status: 'ordered',
+        fa_id: fa.id,
+      });
+
+    if (lineInsertError) {
+      await ctx.client.from('purchase_orders').delete().eq('id', po.id);
+      throw new Error(lineInsertError.message);
+    }
+
+    await ctx.client
+      .from('purchase_request_lines')
+      .update({
+        progress: 'ordered',
+        purchase_order_id: po.id,
+        po_line_number: 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', prLine.id);
+
+    await ctx.client.from('audit_logs').insert({
+      entity_type: 'purchase_order',
+      entity_id: po.id,
+      action: 'create_from_fa',
+      actor: ctx.actor,
+      actor_role: ctx.role,
+      detail: {
+        po_number: poNumber,
+        fa_id: fa.id,
+        pr_line_id: prLine.id,
+        created_by_agent_action: true,
+      },
+    });
+
+    emitPRFAMatched(
+      {
+        prId: prLine.request_id,
+        prNumber: '',
+        prLineId: prLine.id,
+        faId: fa.id,
+        faNumber: fa.fa_number,
+        supplierId: fa.supplier_id,
+        supplierName: fa.supplier_snapshot,
+        materialId: fa.material_id,
+        materialSnapshot: fa.material_snapshot,
+        unitPrice: Number(fa.unit_price),
+        quantity: prLine.quantity,
+        matchType: 'material_id',
+        actor: ctx.actor,
+        actorRole: ctx.role,
+      },
+      'agent_action_confirm_fa',
+    ).catch((error) => console.error('[AgentAction] Failed to emit PR_FA_MATCHED:', error));
+
+    emitPOCreated(
+      {
+        poId: po.id,
+        poNumber,
+        supplierId: fa.supplier_id,
+        supplierName: fa.supplier_snapshot,
+        prId: prLine.request_id,
+        prNumber: undefined,
+        status: 'draft',
+        linesCount: 1,
+        actor: ctx.actor,
+        actorRole: ctx.role,
+      },
+      'agent_action_confirm_fa',
+    ).catch((error) => console.error('[AgentAction] Failed to emit PO_CREATED:', error));
+
+    poCreated = true;
+    poResult = { success: true, poId: po.id, poNumber };
+  }
+
+  const data = {
+    prLineId: input.prLineId,
+    confirmed: true,
+    faId: targetFaId,
+    poCreated,
+    po: poResult,
+  };
+
+  return wrapActionResult('confirm-fa-and-create-po', data, {
+    nextActions: inferNextActions('confirm-fa-and-create-po', data),
+  });
+}
+
+async function updatePOStatusForReceipt(client: DBClient, poId: number) {
+  const { data: lines } = await client
+    .from('purchase_order_lines')
+    .select('status')
+    .eq('order_id', poId);
+
+  if (!lines || lines.length === 0) return;
+
+  const statuses = (lines as Array<{ status: string }>).map((line) => line.status);
+  let newStatus = 'draft';
+  if (statuses.every((status) => status === 'received')) {
+    newStatus = 'received';
+  } else if (statuses.some((status) => status === 'partial_received' || status === 'received')) {
+    newStatus = 'partial';
+  } else if (statuses.every((status) => status === 'ordered')) {
+    newStatus = 'sent';
+  }
+
+  await client
+    .from('purchase_orders')
+    .update({
+      status: newStatus,
+      updated_at: getBeijingISOString(),
+    })
+    .eq('id', poId);
+}
+
+async function approveOverdeliveryInAction(
+  ctx: ActionContext,
+  goodsReceiptId: number,
+  approved: boolean,
+  note?: string,
+) {
+  if (!canApprove(ctx.role)) {
+    throw new Error('只有 Manager 可以审批超收');
+  }
+
+  const { data: gr, error: grError } = await ctx.client
+    .from('goods_receipts')
+    .select('*')
+    .eq('id', goodsReceiptId)
+    .eq('status', 'pending_approval')
+    .single();
+
+  if (grError || !gr) {
+    throw new Error(grError?.message || '收货单不存在或不在待审批状态');
+  }
+
+  const { data: poLine, error: poLineError } = await ctx.client
+    .from('purchase_order_lines')
+    .select('*')
+    .eq('id', gr.po_line_id)
+    .single();
+
+  if (poLineError || !poLine) {
+    throw new Error(poLineError?.message || '采购订单行不存在');
+  }
+
+  const orderQty = Number(poLine.quantity);
+  const grQty = Number(gr.quantity);
+
+  if (approved) {
+    await ctx.client
+      .from('goods_receipts')
+      .update({
+        status: 'approved',
+        approved_by: ctx.actor,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', goodsReceiptId);
+
+    const oldReceived = Number(poLine.received_qty || '0');
+    const newReceivedQty = oldReceived + grQty;
+    const pendingQty = Math.max(0, orderQty - newReceivedQty);
+    const lineStatus = pendingQty === 0 ? 'received' : 'partial_received';
+
+    await ctx.client
+      .from('purchase_order_lines')
+      .update({
+        received_qty: newReceivedQty,
+        pending_qty: pendingQty,
+        status: lineStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', gr.po_line_id);
+
+    await updatePOStatusForReceipt(ctx.client, gr.po_id);
+
+    return {
+      goodsReceiptId,
+      approved: true,
+      status: 'approved',
+      note,
+      newReceivedQty,
+      pendingQty,
+      lineStatus,
+    };
+  }
+
+  await ctx.client
+    .from('goods_receipts')
+    .update({
+      status: 'rejected',
+      approved_by: ctx.actor,
+      approved_at: new Date().toISOString(),
+    })
+    .eq('id', goodsReceiptId);
+
+  return {
+    goodsReceiptId,
+    approved: false,
+    status: 'rejected',
+    note,
+  };
+}
+
+export async function receiveGoodsAndHandleOverdelivery(
+  ctx: ActionContext,
+  input: ReceiveGoodsAndHandleOverdeliveryInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
+  if (!canCreatePO(ctx.role)) {
+    throw new Error('只有 Buyer 或 Manager 可以执行收货动作');
+  }
+
+  const poLineId = Number(input.poLineId);
+  if (!Number.isInteger(poLineId) || poLineId <= 0) {
+    throw new Error('poLineId 必须为正整数');
+  }
+
+  const grQuantity = Number(input.quantity);
+  if (Number.isNaN(grQuantity) || grQuantity <= 0) {
+    throw new Error('quantity 必须为正数');
+  }
+
+  const grType = input.grType || 'in';
+  const receiptDate = input.receiptDate || new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const receiptTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(new Date());
+
+  const { data: poLine, error: poLineError } = await ctx.client
+    .from('purchase_order_lines')
+    .select('*')
+    .eq('id', poLineId)
+    .single();
+
+  if (poLineError || !poLine) {
+    throw new Error(poLineError?.message || `采购订单行不存在 (ID: ${poLineId})`);
+  }
+
+  const orderQty = Number(poLine.quantity);
+  const currentReceived = Number(poLine.received_qty || '0');
+  const newReceivedQty =
+    grType === 'out'
+      ? Math.max(0, currentReceived - grQuantity)
+      : currentReceived + grQuantity;
+  const pendingQty = Math.max(0, orderQty - newReceivedQty);
+
+  let isOverdelivery = false;
+  let overdeliveryRatio = 0;
+  if (grType === 'in' && newReceivedQty > orderQty) {
+    overdeliveryRatio = (newReceivedQty - orderQty) / orderQty;
+    isOverdelivery = overdeliveryRatio > 0.05;
+  }
+
+  const grNumber = await numberGenerators[grType === 'out' ? 'rt' : 'gr']();
+  const { data: goodsReceipt, error: grError } = await ctx.client
+    .from('goods_receipts')
+    .insert({
+      gr_number: grNumber,
+      po_id: input.poId || poLine.order_id,
+      po_line_id: poLineId,
+      gr_type: grType,
+      quantity: grQuantity,
+      receipt_date: receiptDate,
+      receipt_time: receiptTime,
+      receiver: ctx.actor,
+      notes: input.notes || null,
+      status: isOverdelivery ? 'pending_approval' : undefined,
+      is_overdelivery: isOverdelivery,
+      overdelivery_ratio: overdeliveryRatio,
+    })
+    .select()
+    .single();
+
+  if (grError || !goodsReceipt) {
+    throw new Error(grError?.message || '创建收货单失败');
+  }
+
+  const warnings: string[] = [];
+  let approval = null;
+
+  if (isOverdelivery) {
+    warnings.push('超收超过5%，需要 Manager 审批');
+    emitGROverdelivery(
+      {
+        grId: goodsReceipt.id,
+        grNumber,
+        poId: poLine.order_id,
+        poNumber: '',
+        poLineId,
+        materialSnapshot: poLine.material_snapshot || '',
+        orderedQty: orderQty,
+        receivedQty: newReceivedQty,
+        overdeliveryQty: newReceivedQty - orderQty,
+        overdeliveryRatio,
+        grStatus: 'pending_approval',
+        actor: ctx.actor,
+        actorRole: ctx.role,
+      },
+      'agent_action_receive_goods',
+    ).catch((error) => console.error('[AgentAction] Failed to emit GR_OVERDELIVERY:', error));
+
+    if (input.autoApproveOverdelivery && canApprove(ctx.role)) {
+      approval = await approveOverdeliveryInAction(
+        ctx,
+        goodsReceipt.id,
+        input.overdeliveryApproval !== false,
+        input.approvalNote,
+      );
+    }
+  } else {
+    await ctx.client
+      .from('purchase_order_lines')
+      .update({
+        received_qty: newReceivedQty,
+        pending_qty: pendingQty,
+        status: pendingQty === 0 ? 'received' : newReceivedQty > 0 ? 'partial_received' : 'ordered',
+        updated_at: getBeijingISOString(),
+      })
+      .eq('id', poLineId);
+
+    await updatePOStatusForReceipt(ctx.client, poLine.order_id);
+
+    if (poLine.pr_line_id) {
+      await ctx.client
+        .from('purchase_request_lines')
+        .update({
+          progress: pendingQty === 0 ? 'received' : 'partial_received',
+          updated_at: getBeijingISOString(),
+        })
+        .eq('id', poLine.pr_line_id);
+    }
+
+    emitGRCompleted(
+      {
+        grId: goodsReceipt.id,
+        grNumber,
+        poId: poLine.order_id,
+        poNumber: '',
+        poLineId,
+        materialSnapshot: poLine.material_snapshot || '',
+        orderedQty: orderQty,
+        receivedQty: grQuantity,
+        cumulativeReceivedQty: newReceivedQty,
+        pendingQty,
+        isFullyReceived: pendingQty === 0,
+        overdeliveryRatio: undefined,
+        actor: ctx.actor,
+        actorRole: ctx.role,
+      },
+      'agent_action_receive_goods',
+    ).catch((error) => console.error('[AgentAction] Failed to emit GR_COMPLETED:', error));
+  }
+
+  const data = {
+    goodsReceipt,
+    requiresApproval: isOverdelivery && !approval,
+    approval,
+    overdeliveryRatio: isOverdelivery ? overdeliveryRatio : null,
+  };
+
+  return wrapActionResult('receive-goods-and-handle-overdelivery', data, {
+    nextActions: inferNextActions('receive-goods-and-handle-overdelivery', data),
+    warnings,
+  });
+}
+
+export async function submitContractForApproval(
+  ctx: ActionContext,
+  input: SubmitContractForApprovalInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
+  const { data: existing, error: findError } = await ctx.client
+    .from('contracts')
+    .select('*')
+    .eq('id', input.contractId)
+    .single();
+
+  if (findError || !existing) {
+    throw new Error(findError?.message || 'Contract not found');
+  }
+
+  if (existing.status !== 'draft') {
+    throw new Error('Only draft contracts can be submitted');
+  }
+
+  const { data, error } = await ctx.client
+    .from('contracts')
+    .update({
+      status: 'pending',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.contractId)
+    .select()
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || '提交框架协议失败');
+  }
+
+  await ctx.client.from('audit_logs').insert({
+    entity_type: 'contract',
+    entity_id: input.contractId,
+    action: 'submit',
+    actor: ctx.actor,
+    actor_role: ctx.role,
+    detail: {
+      previous_status: 'draft',
+      new_status: 'pending',
+      created_by_agent_action: true,
+    },
+  });
+
+  const { onContractPending } = await import('@/lib/agent-notify');
+  let notification = null;
+  try {
+    notification = await onContractPending(input.contractId);
+  } catch (error) {
+    console.error('[AgentAction] Failed to notify contract pending:', error);
+  }
+
+  const wrapped = wrapActionResult(
+    'submit-contract-for-approval',
+    {
+      contract: data,
+      notification,
+    },
+    {
+      nextActions: inferNextActions('submit-contract-for-approval', data),
+    },
+  );
+
+  return wrapped;
 }

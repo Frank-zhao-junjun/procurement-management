@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    return NextResponse.json(result, { status: result.created ? 201 : 200 });
+    return NextResponse.json(result, { status: result.statusCode });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     const status = message.includes('只有') ? 403 : 500;
