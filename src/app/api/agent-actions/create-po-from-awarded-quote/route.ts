@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { createPOFromAwardedQuote } from '@/lib/agent-actions';
+import { createPOFromAwardedQuote, getIdempotencyKey, runIdempotentAgentAction } from '@/lib/agent-actions';
 import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 /**
@@ -17,15 +17,24 @@ export async function POST(request: NextRequest) {
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
+    const idempotencyKey = await getIdempotencyKey(request, body);
     const quoteId = Number(body.quoteId ?? body.quote_id);
 
     if (!quoteId || Number.isNaN(quoteId)) {
       return NextResponse.json({ error: 'quoteId 为必填数字参数' }, { status: 400 });
     }
 
-    const result = await createPOFromAwardedQuote(
-      { client, actor, role: role as Role },
-      { quoteId },
+    const result = await runIdempotentAgentAction(
+      client,
+      {
+        action: 'create-po-from-awarded-quote',
+        actor,
+        idempotencyKey,
+      },
+      () => createPOFromAwardedQuote(
+        { client, actor, role: role as Role },
+        { quoteId },
+      ),
     );
 
     return NextResponse.json(result, { status: result.statusCode || 200 });

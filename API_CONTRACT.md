@@ -187,10 +187,15 @@ const prId = body.prId; // 如果前端传 pr_id 就获取不到
   "nextActions": [
     {
       "action": "receive-goods-and-handle-overdelivery",
-      "reason": "PO 已生成，可继续执行收货"
+      "reason": "PO 已生成，可继续执行收货",
+      "suggestedPayload": {
+        "poLineId": 1,
+        "quantity": 10
+      }
     }
   ],
-  "warnings": []
+  "warnings": [],
+  "statusCode": 200
 }
 
 // ✅ 对需要 Agent 决策的场景，放在 data 内返回明确状态，而非直接失败
@@ -206,6 +211,15 @@ const prId = body.prId; // 如果前端传 pr_id 就获取不到
   "warnings": [...]
 }
 ```
+
+### 幂等约定
+
+Agent 高层动作接口应支持以下任一幂等键来源：
+
+- 请求头：`Idempotency-Key`
+- 请求体：`requestId`
+
+同一 `actor + action + idempotency key` 的重复请求，应直接返回上次成功结果，避免重复建单、重复提交、重复收货。
 
 ---
 

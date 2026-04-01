@@ -99,11 +99,13 @@ type AgentActionName =
   | 'create-po-from-awarded-quote'
   | 'confirm-fa-and-create-po'
   | 'receive-goods-and-handle-overdelivery'
-  | 'submit-contract-for-approval';
+  | 'submit-contract-for-approval'
+  | 'submit-pr';
 
 type AgentActionNextStep = {
-  action: string;
+  action: AgentActionName;
   reason: string;
+  suggestedPayload?: Record<string, unknown>;
 };
 
 type AgentActionEnvelope<T> = {
@@ -133,6 +135,76 @@ function makeActionResponse<T>(
     warnings: options.warnings ?? [],
     statusCode: options.statusCode,
   };
+}
+
+type IdempotentHandlerOptions = {
+  action: AgentActionName;
+  actor: string;
+  idempotencyKey?: string | null;
+};
+
+function buildIdempotencyConfigKey(action: AgentActionName, actor: string, idempotencyKey: string): string {
+  return `agent_action:${action}:${actor}:${idempotencyKey}`;
+}
+
+export async function getIdempotencyKey(request: Request, body?: Record<string, unknown>): Promise<string | null> {
+  const headerKey = request.headers.get('Idempotency-Key')?.trim();
+  if (headerKey) return headerKey;
+
+  const bodyKey = body?.requestId ?? body?.request_id ?? body?.idempotencyKey ?? body?.idempotency_key;
+  if (typeof bodyKey === 'string' && bodyKey.trim()) {
+    return bodyKey.trim();
+  }
+
+  return null;
+}
+
+export async function runIdempotentAgentAction<T>(
+  client: DBClient,
+  options: IdempotentHandlerOptions,
+  handler: () => Promise<AgentActionEnvelope<T>>,
+): Promise<AgentActionEnvelope<T>> {
+  const { action, actor, idempotencyKey } = options;
+  if (!idempotencyKey) {
+    return handler();
+  }
+
+  const configKey = buildIdempotencyConfigKey(action, actor, idempotencyKey);
+  const { data: existing } = await client
+    .from('system_configs')
+    .select('config_value')
+    .eq('config_key', configKey)
+    .single();
+
+  if (existing?.config_value) {
+    try {
+      const parsed = JSON.parse(existing.config_value);
+      return {
+        ...(parsed as AgentActionEnvelope<T>),
+        warnings: [
+          ...(((parsed as AgentActionEnvelope<T>).warnings || []) as string[]),
+          `幂等命中: ${idempotencyKey}`,
+        ],
+      };
+    } catch {
+      // ignore broken cache and recompute
+    }
+  }
+
+  const result = await handler();
+
+  await client
+    .from('system_configs')
+    .upsert({
+      config_key: configKey,
+      config_value: JSON.stringify(result),
+      description: `Idempotent cache for ${action}`,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'config_key',
+    });
+
+  return result;
 }
 
 function normalizeText(text: string): string {
@@ -1256,6 +1328,9 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
           {
             action: 'confirm-fa-and-create-po',
             reason: '仍有物料需要确认，补充 confirmedMaterialId/confirmedMaterialName 后重试创建 PR',
+            suggestedPayload: {
+              linesNeedingConfirmation: data.unresolvedLines || [],
+            },
           },
         ];
       }
@@ -1279,6 +1354,9 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
           {
             action: 'confirm-fa-and-create-po',
             reason: '存在待确认 FA 匹配，请按 prLineId + faId 继续确认',
+            suggestedPayload: {
+              faMatches: data.approval.faMatches.filter((match: any) => match.requires_confirmation),
+            },
           },
         ];
       }
@@ -1287,6 +1365,9 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
           {
             action: 'create-po-from-awarded-quote',
             reason: '已生成寻源任务，后续报价授标后可自动创建 PO',
+            suggestedPayload: {
+              sourcingTasks: data.approval.sourcingTasks,
+            },
           },
         ];
       }
@@ -1297,6 +1378,10 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
           {
             action: 'receive-goods-and-handle-overdelivery',
             reason: 'PO 已创建，可继续执行收货动作',
+            suggestedPayload: {
+              poId: data.purchaseOrder?.id,
+              poLineId: data.purchaseOrder?.poLineId,
+            },
           },
         ];
       }
@@ -1305,6 +1390,9 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
           {
             action: 'create-po-from-awarded-quote',
             reason: '已创建寻源任务，报价授标后可自动创建 PO',
+            suggestedPayload: {
+              sourcingTaskId: data.sourcingTask?.id,
+            },
           },
         ];
       }
@@ -1314,14 +1402,23 @@ function inferNextActions(action: string, data: any): AgentActionNextStep[] {
         {
           action: 'receive-goods-and-handle-overdelivery',
           reason: 'PO 已生成，可继续执行收货并自动处理超收',
+          suggestedPayload: {
+            poId: data?.purchaseOrder?.id,
+            poNumber: data?.purchaseOrder?.po_number,
+          },
         },
       ];
     case 'receive-goods-and-handle-overdelivery':
       if (data?.requiresApproval && data?.goodsReceipt?.id) {
         return [
           {
-            action: 'approve-overdelivery',
+            action: 'receive-goods-and-handle-overdelivery',
             reason: '收货超收超过阈值，等待 manager agent 审批超收',
+            suggestedPayload: {
+              goodsReceiptId: data.goodsReceipt.id,
+              autoApproveOverdelivery: true,
+              overdeliveryApproval: true,
+            },
           },
         ];
       }

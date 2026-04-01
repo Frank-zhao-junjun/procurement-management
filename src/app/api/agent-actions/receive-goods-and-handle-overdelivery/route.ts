@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { createActionContext, receiveGoodsAndHandleOverdelivery } from '@/lib/agent-actions';
+import {
+  createActionContext,
+  getIdempotencyKey,
+  receiveGoodsAndHandleOverdelivery,
+  runIdempotentAgentAction,
+} from '@/lib/agent-actions';
 
 // POST /api/agent-actions/receive-goods-and-handle-overdelivery
 export async function POST(request: NextRequest) {
   try {
+    const client = getSupabaseClient();
     const body = await request.json();
     const poLineId = Number(body.poLineId ?? body.po_line_id);
     const quantity = Number(body.quantity);
@@ -17,16 +23,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'quantity 必须为正数' }, { status: 400 });
     }
 
-    const result = await receiveGoodsAndHandleOverdelivery(
-      await createActionContext(getSupabaseClient(), request),
+    const ctx = await createActionContext(client, request);
+    const idempotencyKey = await getIdempotencyKey(request, body);
+    const result = await runIdempotentAgentAction(
+      client,
       {
-        poLineId,
-        quantity,
-        poId: body.poId ?? body.po_id,
-        grType: body.grType ?? body.gr_type,
-        receiptDate: body.receiptDate ?? body.receipt_date,
-        notes: body.notes,
+        action: 'receive-goods-and-handle-overdelivery',
+        actor: ctx.actor,
+        idempotencyKey,
       },
+      () =>
+        receiveGoodsAndHandleOverdelivery(ctx, {
+          poLineId,
+          quantity,
+          poId: body.poId ?? body.po_id,
+          grType: body.grType ?? body.gr_type,
+          receiptDate: body.receiptDate ?? body.receipt_date,
+          notes: body.notes,
+          autoApproveOverdelivery: body.autoApproveOverdelivery === true,
+          overdeliveryApproval:
+            body.overdeliveryApproval == null ? undefined : body.overdeliveryApproval !== false,
+          approvalNote: body.approvalNote ?? body.approval_note,
+        }),
     );
 
     return NextResponse.json(result, { status: result.statusCode });

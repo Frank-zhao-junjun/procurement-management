@@ -318,10 +318,16 @@ POST /api/agent-actions/submit-contract-for-approval
   "nextActions": [
     {
       "action": "confirm-fa-and-create-po",
-      "reason": "存在待确认 FA 匹配，请继续处理"
+      "reason": "存在待确认 FA 匹配，请继续处理",
+      "suggestedPayload": {
+        "prLineId": 12,
+        "faId": 3,
+        "autoCreatePO": true
+      }
     }
   ],
-  "warnings": []
+  "warnings": [],
+  "statusCode": 200
 }
 ```
 
@@ -330,7 +336,18 @@ POST /api/agent-actions/submit-contract-for-approval
 - `action`: 当前执行的高层动作名
 - `data`: 动作结果主体
 - `nextActions`: 推荐给 Agent 的下一步动作
+- `nextActions[].suggestedPayload`: 推荐下一步直接可复用的请求体
 - `warnings`: 非阻塞告警（如超收待审批）
+- `statusCode`: 建议对应的 HTTP 状态码
+
+### 幂等调用（推荐 Agent 使用）
+
+高层动作接口支持以下任一幂等键：
+
+- 请求头：`Idempotency-Key`
+- 请求体：`requestId` / `request_id` / `idempotencyKey`
+
+同一 `actor + action + idempotencyKey` 重复调用时，系统会直接返回上次成功结果，避免因 Agent 重试导致重复建单、重复提交或重复收货。
 
 ### 0. 物料匹配检查（推荐第一步）
 

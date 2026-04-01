@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { createActionContext, submitContractForApproval } from '@/lib/agent-actions';
+import {
+  createActionContext,
+  getIdempotencyKey,
+  runIdempotentAgentAction,
+  submitContractForApproval,
+} from '@/lib/agent-actions';
 
 // POST /api/agent-actions/submit-contract-for-approval
 export async function POST(request: NextRequest) {
@@ -12,11 +17,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'contractId 必须为正整数' }, { status: 400 });
     }
 
-    const result = await submitContractForApproval(
-      await createActionContext(getSupabaseClient(), request),
+    const client = getSupabaseClient();
+    const ctx = await createActionContext(client, request);
+    const idempotencyKey = await getIdempotencyKey(request, body);
+    const result = await runIdempotentAgentAction(
+      client,
       {
-        contractId,
+        action: 'submit-contract-for-approval',
+        actor: ctx.actor,
+        idempotencyKey,
       },
+      () =>
+        submitContractForApproval(ctx, {
+          contractId,
+        }),
     );
 
     return NextResponse.json(result, { status: result.statusCode });

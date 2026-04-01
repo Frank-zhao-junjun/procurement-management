@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { confirmFAAndCreatePO, createActionContext } from '@/lib/agent-actions';
+import {
+  confirmFAAndCreatePO,
+  createActionContext,
+  getIdempotencyKey,
+  runIdempotentAgentAction,
+} from '@/lib/agent-actions';
 
 // POST /api/agent-actions/confirm-fa-and-create-po
 export async function POST(request: NextRequest) {
   try {
+    const client = getSupabaseClient();
     const body = await request.json();
     const prLineId = Number(body.prLineId ?? body.pr_line_id);
     const faId =
@@ -20,14 +26,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'faId 必须为正整数' }, { status: 400 });
     }
 
-    const result = await confirmFAAndCreatePO(
-      await createActionContext(getSupabaseClient(), request),
+    const ctx = await createActionContext(client, request);
+    const idempotencyKey = await getIdempotencyKey(request, body);
+    const result = await runIdempotentAgentAction(
+      client,
       {
-        prLineId,
-        faId,
-        confirmed: body.confirmed !== false,
-        autoCreatePO: body.autoCreatePO !== false,
+        action: 'confirm-fa-and-create-po',
+        actor: ctx.actor,
+        idempotencyKey,
       },
+      () =>
+        confirmFAAndCreatePO(ctx, {
+          prLineId,
+          faId,
+          confirmed: body.confirmed !== false,
+          autoCreatePO: body.autoCreatePO !== false,
+        }),
     );
 
     return NextResponse.json(result, { status: result.statusCode || 200 });

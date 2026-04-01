@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { createPRFromMaterialCheck } from '@/lib/agent-actions';
+import { createPRFromMaterialCheck, getIdempotencyKey, runIdempotentAgentAction } from '@/lib/agent-actions';
 import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 export async function POST(request: NextRequest) {
@@ -8,6 +8,7 @@ export async function POST(request: NextRequest) {
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
+    const idempotencyKey = await getIdempotencyKey(request, body);
 
     if (!body?.reason || typeof body.reason !== 'string') {
       return NextResponse.json({ error: 'reason 为必填字符串' }, { status: 400 });
@@ -17,19 +18,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'lines 为必填且不能为空数组' }, { status: 400 });
     }
 
-    const result = await createPRFromMaterialCheck(
+    const result = await runIdempotentAgentAction(
+      client,
       {
-        client,
+        action: 'create-pr-from-material-check',
         actor,
-        role: role as Role,
+        idempotencyKey,
       },
-      {
-        reason: body.reason,
-        lines: body.lines,
-        autoSubmit: body.autoSubmit === true,
-        createMissingMaterials: body.createMissingMaterials === true,
-        cancelledLines: Array.isArray(body.cancelledLines) ? body.cancelledLines : [],
-      },
+      () => createPRFromMaterialCheck(
+        {
+          client,
+          actor,
+          role: role as Role,
+        },
+        {
+          reason: body.reason,
+          lines: body.lines,
+          autoSubmit: body.autoSubmit === true,
+          createMissingMaterials: body.createMissingMaterials === true,
+          cancelledLines: Array.isArray(body.cancelledLines) ? body.cancelledLines : [],
+        },
+      ),
     );
 
     return NextResponse.json(result, { status: result.statusCode });
