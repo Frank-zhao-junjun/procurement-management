@@ -195,6 +195,68 @@ curl -X POST http://localhost:5000/api/purchase-requests \
 
 ## 完整业务流程
 
+## Agent 高层动作接口（推荐 Agent 使用）
+
+对于 Agent 调用，推荐优先使用高层动作接口，而不是自己编排多个底层 CRUD / 状态流转接口。
+
+### 1. 创建 PR（自动物料检查）
+
+```bash
+POST /api/agent-actions/create-pr-from-material-check
+{
+  "reason": "办公设备采购",
+  "lines": [
+    {"requirementText": "无线鼠标", "quantity": 10},
+    {"requirementText": "蓝牙键盘", "quantity": 5}
+  ],
+  "autoSubmit": true,
+  "createMissingMaterials": true
+}
+```
+
+**行为说明**：
+- 自动执行物料匹配检查
+- 精确匹配时自动使用现有物料
+- `createMissingMaterials=true` 时，未匹配物料会自动创建后继续
+- 若仍存在需要人工/Agent 二次确认的物料，返回 `requiresConfirmation: true`，不会创建 PR
+- `autoSubmit=true` 时，会在创建 PR 后自动提交
+
+### 2. 审批 PR 并处理 FA / 寻源 / 自动 PO
+
+```bash
+POST /api/agent-actions/approve-pr-and-handle-fa
+{
+  "prId": 1,
+  "approved": true,
+  "note": "预算内，批准"
+}
+```
+
+**行为说明**：
+- 仅 Manager 可调用
+- 审批通过后自动执行：
+  - FA 精确匹配
+  - 需确认的匹配置为 `pending_confirm`
+  - 无匹配时自动创建寻源任务
+  - FA 精确命中时自动创建 PO
+
+### 3. 授标报价并自动创建 PO
+
+```bash
+POST /api/agent-actions/create-po-from-awarded-quote
+{
+  "quoteId": 12
+}
+```
+
+**行为说明**：
+- 仅 Buyer / Manager 可调用
+- 自动完成：
+  - 授标报价单
+  - 将同寻源任务下其他报价置为 rejected
+  - 创建 PO 与 PO 行
+  - 更新寻源任务、PR 行状态
+
 ### 0. 物料匹配检查（推荐第一步）
 
 **重要**：在创建采购申请前，建议先检查物料匹配情况，避免后续流程中断。

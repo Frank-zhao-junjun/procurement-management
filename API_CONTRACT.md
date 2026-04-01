@@ -152,6 +152,44 @@ const prId = body.prId; // 如果前端传 pr_id 就获取不到
 
 ---
 
+## 3.4 Agent 高层动作接口
+
+当调用方主要是 Agent 时，优先提供“业务动作”接口，而不是要求 Agent 组合多个底层 CRUD API。
+
+### 设计原则
+
+- 一个动作接口完成一个业务目标
+- 服务端负责串联校验、状态流转、审计和事件发布
+- 保留底层资源接口，供 UI 查询或需要细粒度控制的场景使用
+
+### 推荐高层动作接口
+
+| 接口 | 说明 | 典型调用方 |
+|------|------|-----------|
+| `POST /api/agent-actions/create-pr-from-material-check` | 检查物料、必要时自动补充确认并创建 PR，可选自动提交 | requester / buyer agent |
+| `POST /api/agent-actions/approve-pr-and-handle-fa` | 审批 PR，并自动执行 FA 匹配/寻源/自动建 PO | manager agent |
+| `POST /api/agent-actions/create-po-from-awarded-quote` | 授标报价单并自动创建 PO | buyer agent |
+
+### 错误处理约定
+
+```typescript
+// ✅ 动作接口应返回面向任务的结果，而不是只返回单表写入结果
+{
+  "success": true,
+  "purchaseOrder": {...},
+  "quote": {...}
+}
+
+// ✅ 对需要 Agent 决策的场景，返回 requiresConfirmation 而非直接失败
+{
+  "created": false,
+  "requiresConfirmation": true,
+  "unresolvedLines": [...]
+}
+```
+
+---
+
 ## 4. 数据类型规范
 
 ### 4.1 数据库类型到 API 类型的映射
