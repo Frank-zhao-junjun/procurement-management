@@ -1,5 +1,6 @@
 import { Client as PgClient } from 'pg';
 import { getDatabaseUrl } from '@/storage/database';
+import { exec, queryMany, queryOne, withPgTransaction, type PgTransactionClient } from '@/lib/transactional-db';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getBeijingISOString } from '@/lib/datetime';
 import {
@@ -993,13 +994,14 @@ async function tryCreatePOInTransaction(
   }
 }
 
-async function calculateNextPOStatusInTransaction(pg: PgClient, poId: number): Promise<string> {
-  const poLines = await pg.query(
+async function calculateNextPOStatusInTransaction(tx: PgTransactionClient, poId: number): Promise<string> {
+  const poLines = await queryMany<{ status: string }>(
+    tx,
     'SELECT status FROM purchase_order_lines WHERE order_id = $1',
     [poId],
   );
 
-  const statuses = poLines.rows.map((row) => String(row.status));
+  const statuses = poLines.map((row) => String(row.status));
   if (statuses.length === 0) return 'draft';
   if (statuses.every((status) => status === 'received')) return 'received';
   if (statuses.some((status) => status === 'partial_received' || status === 'received')) return 'partial';
@@ -1882,7 +1884,7 @@ async function tryApprovePRAndHandleFAInTransaction(
   }
 }
 
-async function tryApprovePRInTransaction(
+async function _deprecated_tryApprovePRInTransaction(
   ctx: ActionContext,
   input: ApprovePrInput,
 ): Promise<

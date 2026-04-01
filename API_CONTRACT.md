@@ -234,6 +234,7 @@ Agent 高层动作接口应支持以下任一幂等键来源：
 - 对于 `create-pr-from-material-check`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 PR header + lines 写入；否则回退到写后校验 + 补偿删除策略
 - 对于 `approve-pr-and-handle-fa`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 PR 审批、PR line 推进、FA 匹配、寻源任务创建与自动建 PO；否则回退到当前校验补偿策略
 - 对于 `receive-goods-and-handle-overdelivery`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 GR 创建、PO/PR 状态联动及超收审批状态落库；否则回退到写后校验 + 补偿删除策略
+- 推荐将事务能力沉淀为统一的 transaction runner、typed SQL helpers 与 action-level transactional templates，避免在每个动作内重复手写 `BEGIN/COMMIT/ROLLBACK`
 
 ---
 
