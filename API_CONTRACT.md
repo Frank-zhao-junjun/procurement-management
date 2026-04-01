@@ -227,11 +227,12 @@ Agent 高层动作接口应支持以下任一幂等键来源：
 ### 写入一致性约定
 
 - 对关键多表动作（如 PR 创建、PO 创建、FA 确认建 PO、收货）应执行写后校验
-- 当部署环境提供 `DATABASE_URL` 时，PR 创建、FA 确认建 PO、报价授标建 PO、收货处理应优先使用真实数据库事务
+- 当部署环境提供 `DATABASE_URL` 时，PR 创建、PR 审批处理、FA 确认建 PO、报价授标建 PO、收货处理应优先使用真实数据库事务
 - 只有在 header / lines 等关键记录都验证存在后，才允许返回 `success: true`
 - 如果 header 已创建但 lines 校验失败，服务端应补偿删除已写入 header，避免出现“表头成功、行项目失败但仍返回成功”的半成功状态
 - 因此，Agent 不应再仅以“拿到单据号”判断成功，而应以接口返回的 `success=true` 且 `data` 中关键实体存在为准
 - 对于 `create-pr-from-material-check`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 PR header + lines 写入；否则回退到写后校验 + 补偿删除策略
+- 对于 `approve-pr-and-handle-fa`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 PR 审批、PR line 推进、FA 匹配、寻源任务创建与自动建 PO；否则回退到当前校验补偿策略
 - 对于 `receive-goods-and-handle-overdelivery`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 GR 创建、PO/PR 状态联动及超收审批状态落库；否则回退到写后校验 + 补偿删除策略
 
 ---

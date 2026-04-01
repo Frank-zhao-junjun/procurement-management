@@ -391,6 +391,7 @@ GET /api/agent-actions/manifest
 
 当部署环境提供 `DATABASE_URL` 时，以下关键动作优先使用真实 PostgreSQL 事务：
 - `create-pr-from-material-check`
+- `approve-pr-and-handle-fa`
 - `confirm-fa-and-create-po`
 - `create-po-from-awarded-quote`
 - `receive-goods-and-handle-overdelivery`
@@ -398,6 +399,7 @@ GET /api/agent-actions/manifest
 ### 事务与一致性说明
 
 - 创建 PR（header + items）会优先尝试使用 `DATABASE_URL` 走真实数据库事务
+- 审批 PR（含 PR 状态推进、FA 匹配、待确认标记、寻源任务创建、自动建 PO）也会优先尝试使用 `DATABASE_URL` 走真实数据库事务
 - 收货（GR 创建 + PO 行更新 + PO 头状态更新 + PR 行进度更新）也会优先尝试使用 `DATABASE_URL` 走真实数据库事务
 - 若当前环境未提供 `DATABASE_URL`，则回退为“写后校验 + 补偿回滚”模式
 - 因此在支持直连数据库的部署环境中，PR / PO / GR 关键写链路的一致性会进一步提升，显著降低半成功风险

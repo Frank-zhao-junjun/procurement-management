@@ -1559,6 +1559,617 @@ async function matchFrameworkAgreements(client: any, requestId: number, actor: s
   return result;
 }
 
+async function tryApprovePRAndHandleFAInTransaction(
+  ctx: ActionContext,
+  input: ApprovePrInput,
+): Promise<
+  | {
+      existing: Record<string, unknown>;
+      fullPR: Record<string, unknown>;
+      lines: Record<string, unknown>[];
+      approvalResult: {
+        approved: boolean;
+        autoPOs: Array<Record<string, unknown>>;
+        sourcingTasks: Array<Record<string, unknown>>;
+        faMatches: Array<Record<string, unknown>>;
+      };
+      transaction_mode: 'pg';
+    }
+  | null
+> {
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const approved = input.approved !== false;
+  const pg = new PgClient({ connectionString: databaseUrl });
+  await pg.connect();
+
+  try {
+    await pg.query('BEGIN');
+
+    const existingResult = await pg.query(
+      'SELECT id, status, pr_number, applicant FROM purchase_requests WHERE id = $1 FOR UPDATE',
+      [input.prId],
+    );
+    if (!existingResult.rowCount || !existingResult.rows[0]) {
+      throw new Error('Purchase request not found');
+    }
+
+    const existing = existingResult.rows[0] as Record<string, unknown>;
+    const currentStatus = String(existing.status);
+    if (!['submitted', 'pending'].includes(currentStatus)) {
+      throw new Error(`Cannot approve request in status: ${currentStatus}`);
+    }
+
+    const newStatus = approved ? 'approved' : 'rejected';
+    await pg.query(
+      `UPDATE purchase_requests
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [newStatus, input.prId],
+    );
+
+    const approvalResult = {
+      approved: false,
+      autoPOs: [] as Array<Record<string, unknown>>,
+      sourcingTasks: [] as Array<Record<string, unknown>>,
+      faMatches: [] as Array<Record<string, unknown>>,
+    };
+
+    if (approved) {
+      await pg.query(
+        `UPDATE purchase_request_lines
+         SET progress = 'approved', updated_at = NOW()
+         WHERE request_id = $1`,
+        [input.prId],
+      );
+
+      const linesResult = await pg.query(
+        'SELECT * FROM purchase_request_lines WHERE request_id = $1 AND progress = $2 ORDER BY line_number ASC',
+        [input.prId, 'approved'],
+      );
+      const prLines = linesResult.rows as Array<Record<string, unknown>>;
+
+      const todayShanghai = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+
+      const agreementsResult = await pg.query(
+        `SELECT * FROM framework_agreements
+         WHERE status = 'active'
+           AND valid_from <= $1
+           AND valid_to >= $1`,
+        [todayShanghai],
+      );
+      const agreements = agreementsResult.rows as Array<Record<string, unknown>>;
+
+      const supplierBuckets = new Map<
+        number,
+        Array<{ line: Record<string, unknown>; fa: Record<string, unknown>; unitPrice: number }>
+      >();
+
+      for (const line of prLines) {
+        const materialId = line.material_id == null ? null : Number(line.material_id);
+        const idMatches = agreements.filter(
+          (fa) => fa.material_id != null && materialId != null && Number(fa.material_id) === materialId,
+        );
+        const textMatches = agreements.filter(
+          (fa) =>
+            normalizeText(String(fa.material_original_text || '')) ===
+            normalizeText(String(line.requirement_text || '')),
+        );
+        const allMatches = [
+          ...idMatches,
+          ...textMatches.filter((fa) => !idMatches.some((matched) => matched.id === fa.id)),
+        ].sort((a, b) => Number(a.unit_price) - Number(b.unit_price));
+
+        if (allMatches.length > 0) {
+          const best = allMatches[0];
+          const isExactMatch = idMatches.some((matched) => matched.id === best.id);
+
+          if (isExactMatch && materialId !== null) {
+            const supplierId = Number(best.supplier_id);
+            if (!supplierBuckets.has(supplierId)) {
+              supplierBuckets.set(supplierId, []);
+            }
+            supplierBuckets.get(supplierId)!.push({
+              line,
+              fa: best,
+              unitPrice: Number(best.unit_price),
+            });
+            approvalResult.faMatches.push({
+              id: Number(best.id),
+              fa_number: String(best.fa_number),
+              supplier_snapshot: String(best.supplier_snapshot || ''),
+              unit_price: Number(best.unit_price),
+              match_type: 'material_id',
+            });
+          } else {
+            await pg.query(
+              `UPDATE purchase_request_lines
+               SET progress = 'pending_confirm',
+                   material_id = $1,
+                   material_snapshot = $2,
+                   match_confirm = 'pending',
+                   matched_fa_id = $3,
+                   updated_at = NOW()
+               WHERE id = $4`,
+              [best.material_id, best.material_snapshot, best.id, line.id],
+            );
+            approvalResult.faMatches.push({
+              id: Number(best.id),
+              fa_number: String(best.fa_number),
+              supplier_snapshot: String(best.supplier_snapshot || ''),
+              unit_price: Number(best.unit_price),
+              match_type: 'text_similarity',
+              requires_confirmation: true,
+            });
+          }
+          continue;
+        }
+
+        const taskNumber = await numberGenerators.sc();
+        const sourcingTaskResult = await pg.query(
+          `INSERT INTO sourcing_tasks (
+            task_number, pr_id, pr_line_id, material_id, material_snapshot,
+            requirement_text, status, created_by, created_at
+          ) VALUES ($1, $2, $3, NULL, $4, $5, 'pending', 'system', NOW())
+          RETURNING *`,
+          [taskNumber, input.prId, line.id, line.requirement_text, line.requirement_text],
+        );
+
+        if (!sourcingTaskResult.rowCount || !sourcingTaskResult.rows[0]) {
+          throw new Error('事务内创建寻源任务失败');
+        }
+
+        const sourcingTask = sourcingTaskResult.rows[0] as Record<string, unknown>;
+        approvalResult.sourcingTasks.push(sourcingTask);
+
+        await pg.query(
+          `UPDATE purchase_request_lines
+           SET progress = 'sourced',
+               sourcing_task_id = $1,
+               updated_at = NOW()
+           WHERE id = $2`,
+          [sourcingTask.id, line.id],
+        );
+
+        await pg.query(
+          `INSERT INTO audit_logs (
+            entity_type, entity_id, action, actor, actor_role, detail, created_at
+          ) VALUES ($1, $2, $3, 'system', 'system', $4::jsonb, NOW())`,
+          [
+            'purchase_request_line',
+            line.id,
+            'create_sourcing_task',
+            JSON.stringify({
+              sourcing_task_id: sourcingTask.id,
+              task_number: taskNumber,
+              transaction_mode: 'pg',
+            }),
+          ],
+        );
+      }
+
+      for (const [supplierId, supplierLines] of supplierBuckets.entries()) {
+        const first = supplierLines[0];
+        const transactionalPO = await tryCreatePOInTransaction(ctx, {
+          supplierId,
+          supplierSnapshot: String(first.fa.supplier_snapshot || ''),
+          deliveryDate: null,
+          status: 'sent',
+          prId: input.prId,
+          prLineId: Number(first.line.id),
+          materialId: first.line.material_id == null ? null : Number(first.line.material_id),
+          materialSnapshot: String(first.line.material_snapshot || first.fa.material_snapshot || ''),
+          quantity: first.line.quantity as number | string,
+          unitPrice: first.unitPrice,
+          totalPrice: Number(first.line.quantity) * first.unitPrice,
+          faId: Number(first.fa.id),
+          actorRole: ctx.role,
+          auditAction: 'create_from_fa',
+          auditDetail: {
+            pr_id: input.prId,
+            pr_number: String(existing.pr_number || ''),
+            supplier_id: supplierId,
+            supplier_snapshot: String(first.fa.supplier_snapshot || ''),
+            lines_count: supplierLines.length,
+            created_by_agent_action: true,
+          },
+          updatePrLine: {
+            id: Number(first.line.id),
+            progress: 'ordered',
+            poLineNumber: 1,
+          },
+        });
+
+        if (!transactionalPO) {
+          throw new Error('审批事务依赖的 PO 事务能力不可用');
+        }
+
+        for (let index = 1; index < supplierLines.length; index += 1) {
+          const item = supplierLines[index];
+          await pg.query(
+            `INSERT INTO purchase_order_lines (
+              order_id, line_number, pr_id, pr_line_id, material_id, material_snapshot,
+              quantity, unit_price, total_price, received_qty, pending_qty, status, fa_id, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, 'ordered', $11, NOW())`,
+            [
+              transactionalPO.po.id,
+              index + 1,
+              input.prId,
+              item.line.id,
+              item.line.material_id,
+              item.line.material_snapshot || item.fa.material_snapshot,
+              item.line.quantity,
+              item.unitPrice,
+              Number(item.line.quantity) * item.unitPrice,
+              item.line.quantity,
+              item.fa.id,
+            ],
+          );
+          await pg.query(
+            `UPDATE purchase_request_lines
+             SET progress = 'ordered',
+                 purchase_order_id = $1,
+                 po_line_number = $2,
+                 matched_fa_id = $3,
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [transactionalPO.po.id, index + 1, item.fa.id, item.line.id],
+          );
+        }
+
+        approvalResult.autoPOs.push({
+          ...transactionalPO.po,
+          po_number: transactionalPO.po.po_number,
+        });
+      }
+
+      approvalResult.approved = true;
+    }
+
+    await pg.query(
+      `INSERT INTO audit_logs (
+        entity_type, entity_id, action, actor, actor_role, detail, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+      [
+        'purchase_request',
+        input.prId,
+        approved ? 'approve' : 'reject',
+        ctx.actor,
+        ctx.role,
+        JSON.stringify({
+          from_status: currentStatus,
+          to_status: newStatus,
+          note: input.note,
+          created_by_agent_action: true,
+          transaction_mode: 'pg',
+          ...approvalResult,
+        }),
+      ],
+    );
+
+    const fullPRResult = await pg.query(
+      'SELECT * FROM purchase_requests WHERE id = $1',
+      [input.prId],
+    );
+    const fullPR = fullPRResult.rows[0] as Record<string, unknown>;
+    const linesResult = await pg.query(
+      'SELECT * FROM purchase_request_lines WHERE request_id = $1 ORDER BY line_number ASC',
+      [input.prId],
+    );
+
+    await pg.query('COMMIT');
+
+    return {
+      existing,
+      fullPR,
+      lines: linesResult.rows as Record<string, unknown>[],
+      approvalResult,
+      transaction_mode: 'pg',
+    };
+  } catch (error) {
+    await pg.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pg.end();
+  }
+}
+
+async function tryApprovePRInTransaction(
+  ctx: ActionContext,
+  input: ApprovePrInput,
+): Promise<
+  | {
+      data: Record<string, unknown>;
+      approval: {
+        approved: boolean;
+        autoPOs: any[];
+        sourcingTasks: any[];
+        faMatches: any[];
+      };
+      events_published: {
+        pr_approved: true;
+        sourcing_tasks: number;
+        auto_pos: number;
+      };
+      transaction_mode: 'pg';
+    }
+  | null
+> {
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const pg = new PgClient({ connectionString: databaseUrl });
+  await pg.connect();
+
+  try {
+    await pg.query('BEGIN');
+
+    const approved = input.approved !== false;
+    const existingResult = await pg.query(
+      'SELECT id, status, pr_number, applicant FROM purchase_requests WHERE id = $1 FOR UPDATE',
+      [input.prId],
+    );
+    if (!existingResult.rowCount || !existingResult.rows[0]) {
+      throw new Error('Purchase request not found');
+    }
+
+    const existing = existingResult.rows[0] as Record<string, unknown>;
+    const currentStatus = String(existing.status);
+    if (!['submitted', 'pending'].includes(currentStatus)) {
+      throw new Error(`Cannot approve request in status: ${currentStatus}`);
+    }
+
+    const newStatus = approved ? 'approved' : 'rejected';
+    await pg.query(
+      'UPDATE purchase_requests SET status = $1, updated_at = NOW() WHERE id = $2',
+      [newStatus, input.prId],
+    );
+
+    const approvalResult = {
+      approved: false,
+      autoPOs: [] as any[],
+      sourcingTasks: [] as any[],
+      faMatches: [] as any[],
+    };
+
+    if (approved) {
+      await pg.query(
+        'UPDATE purchase_request_lines SET progress = $1, updated_at = NOW() WHERE request_id = $2',
+        ['approved', input.prId],
+      );
+
+      const prResult = await pg.query('SELECT * FROM purchase_requests WHERE id = $1', [input.prId]);
+      const pr = prResult.rows[0] as Record<string, unknown> | undefined;
+      if (!pr) {
+        throw new Error('事务内审批后未找到采购申请');
+      }
+
+      const lineResult = await pg.query(
+        'SELECT * FROM purchase_request_lines WHERE request_id = $1 AND progress = $2 ORDER BY id ASC',
+        [input.prId, 'approved'],
+      );
+
+      const autoPOGroups = new Map<number, Array<{
+        line: Record<string, unknown>;
+        fa: Record<string, unknown>;
+        unitPrice: number;
+      }>>();
+
+      for (const line of lineResult.rows as Array<Record<string, unknown>>) {
+        const todayShanghai = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date());
+
+        const agreementsResult = await pg.query(
+          `SELECT * FROM framework_agreements
+           WHERE status = 'active'
+             AND valid_from <= $1
+             AND valid_to >= $1`,
+          [todayShanghai],
+        );
+
+        const agreements = agreementsResult.rows as Array<Record<string, unknown>>;
+        const idMatches = agreements.filter(
+          (fa) => fa.material_id === line.material_id && fa.material_id !== null,
+        );
+        const textMatches = agreements.filter(
+          (fa) =>
+            normalizeText(String(fa.material_original_text || '')) ===
+            normalizeText(String(line.requirement_text || '')),
+        );
+        const allMatches = [
+          ...idMatches,
+          ...textMatches.filter((fa) => !idMatches.some((matched) => matched.id === fa.id)),
+        ];
+
+        if (allMatches.length > 0) {
+          allMatches.sort((a, b) => Number(a.unit_price) - Number(b.unit_price));
+          const best = allMatches[0];
+          const isExactMatch = idMatches.some((matched) => matched.id === best.id);
+
+          if (isExactMatch && line.material_id !== null) {
+            const supplierId = Number(best.supplier_id);
+            const list = autoPOGroups.get(supplierId) || [];
+            list.push({
+              line,
+              fa: best,
+              unitPrice: Number(best.unit_price),
+            });
+            autoPOGroups.set(supplierId, list);
+            approvalResult.faMatches.push({
+              id: best.id,
+              fa_number: best.fa_number,
+              supplier_snapshot: best.supplier_snapshot,
+              unit_price: Number(best.unit_price),
+              match_type: 'material_id',
+            });
+          } else {
+            await pg.query(
+              `UPDATE purchase_request_lines
+               SET progress = 'pending_confirm',
+                   material_id = $1,
+                   material_snapshot = $2,
+                   match_confirm = 'pending',
+                   matched_fa_id = $3,
+                   updated_at = NOW()
+               WHERE id = $4`,
+              [best.material_id, best.material_snapshot, best.id, line.id],
+            );
+            approvalResult.faMatches.push({
+              id: best.id,
+              fa_number: best.fa_number,
+              supplier_snapshot: best.supplier_snapshot,
+              unit_price: Number(best.unit_price),
+              match_type: 'text_similarity',
+              requires_confirmation: true,
+            });
+          }
+          continue;
+        }
+
+        const taskNumber = await numberGenerators.sc();
+        const sourcingTaskResult = await pg.query(
+          `INSERT INTO sourcing_tasks (
+             task_number, pr_id, pr_line_id, material_id, material_snapshot,
+             requirement_text, status, created_by, created_at
+           ) VALUES ($1, $2, $3, NULL, $4, $5, 'pending', 'system', NOW())
+           RETURNING *`,
+          [taskNumber, input.prId, line.id, line.requirement_text, line.requirement_text],
+        );
+        const sourcingTask = sourcingTaskResult.rows[0] as Record<string, unknown> | undefined;
+        if (!sourcingTask) {
+          throw new Error('事务内创建寻源任务失败');
+        }
+
+        approvalResult.sourcingTasks.push(sourcingTask);
+        await pg.query(
+          `UPDATE purchase_request_lines
+           SET progress = 'sourced', sourcing_task_id = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [sourcingTask.id, line.id],
+        );
+      }
+
+      for (const [supplierId, groupedLines] of autoPOGroups.entries()) {
+        const poNumber = await numberGenerators.po();
+        const supplierName = String(groupedLines[0].fa.supplier_snapshot || '');
+        const insertPO = await pg.query(
+          `INSERT INTO purchase_orders (
+             po_number, supplier_id, supplier_snapshot, pr_id, status, created_by, created_at
+           ) VALUES ($1, $2, $3, $4, 'sent', $5, NOW())
+           RETURNING *`,
+          [poNumber, supplierId, supplierName, input.prId, ctx.actor],
+        );
+        const po = insertPO.rows[0] as Record<string, unknown> | undefined;
+        if (!po) {
+          throw new Error('事务内自动创建采购订单失败');
+        }
+
+        const poId = Number(po.id);
+        for (let index = 0; index < groupedLines.length; index += 1) {
+          const item = groupedLines[index];
+          await pg.query(
+            `INSERT INTO purchase_order_lines (
+               order_id, line_number, pr_id, pr_line_id, material_id, material_snapshot,
+               quantity, unit_price, total_price, received_qty, pending_qty, status, fa_id, created_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, $10, 'ordered', $11, NOW())`,
+            [
+              poId,
+              index + 1,
+              input.prId,
+              item.line.id,
+              item.line.material_id,
+              item.line.material_snapshot || item.fa.material_snapshot,
+              item.line.quantity,
+              item.unitPrice,
+              Number(item.line.quantity) * item.unitPrice,
+              item.line.quantity,
+              item.fa.id,
+            ],
+          );
+
+          await pg.query(
+            `UPDATE purchase_request_lines
+             SET progress = 'ordered',
+                 purchase_order_id = $1,
+                 po_line_number = $2,
+                 matched_fa_id = $3,
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [poId, index + 1, item.fa.id, item.line.id],
+          );
+        }
+
+        approvalResult.autoPOs.push(po);
+      }
+
+      approvalResult.approved = true;
+    }
+
+    await pg.query(
+      `INSERT INTO audit_logs (
+         entity_type, entity_id, action, actor, actor_role, detail, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+      [
+        'purchase_request',
+        input.prId,
+        approved ? 'approve' : 'reject',
+        ctx.actor,
+        ctx.role,
+        JSON.stringify({
+          from_status: currentStatus,
+          to_status: newStatus,
+          note: input.note,
+          created_by_agent_action: true,
+          transaction_mode: 'pg',
+          ...approvalResult,
+        }),
+      ],
+    );
+
+    const fullPRResult = await pg.query('SELECT * FROM purchase_requests WHERE id = $1', [input.prId]);
+    const fullPR = fullPRResult.rows[0] as Record<string, unknown> | undefined;
+    const linesResult = await pg.query(
+      'SELECT * FROM purchase_request_lines WHERE request_id = $1 ORDER BY line_number ASC',
+      [input.prId],
+    );
+
+    await pg.query('COMMIT');
+
+    return {
+      data: {
+        ...(fullPR || {}),
+        purchase_request_lines: linesResult.rows,
+      },
+      approval: approvalResult,
+      events_published: {
+        pr_approved: true,
+        sourcing_tasks: approvalResult.sourcingTasks.length,
+        auto_pos: approvalResult.autoPOs.length,
+      },
+      transaction_mode: 'pg',
+    };
+  } catch (error) {
+    await pg.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pg.end();
+  }
+}
+
 export async function createPRFromMaterialCheck(
   ctx: ActionContext,
   input: CreatePrFromMaterialCheckInput,
@@ -1676,66 +2287,78 @@ export async function approvePRAndHandleFA(
     throw new Error(`Cannot approve request in status: ${existing.status}`);
   }
 
-  const newStatus = approved ? 'approved' : 'rejected';
-  const { error } = await ctx.client
-    .from('purchase_requests')
-    .update({
-      status: newStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', input.prId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
+  const transactionalApproval = await tryApprovePRAndHandleFAInTransaction(ctx, input);
+  let newStatus = approved ? 'approved' : 'rejected';
   let approvalResult = {
     approved: false,
     autoPOs: [] as any[],
     sourcingTasks: [] as any[],
     faMatches: [] as any[],
   };
+  let fullPR: any;
+  let lines: any[] | null = null;
 
-  if (approved) {
-    await ctx.client
-      .from('purchase_request_lines')
+  if (transactionalApproval) {
+    newStatus = String(transactionalApproval.fullPR.status || newStatus);
+    approvalResult = transactionalApproval.approvalResult;
+    fullPR = transactionalApproval.fullPR;
+    lines = transactionalApproval.lines;
+  } else {
+    const { error } = await ctx.client
+      .from('purchase_requests')
       .update({
-        progress: 'approved',
+        status: newStatus,
         updated_at: new Date().toISOString(),
       })
+      .eq('id', input.prId);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (approved) {
+      await ctx.client
+        .from('purchase_request_lines')
+        .update({
+          progress: 'approved',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('request_id', input.prId);
+
+      approvalResult = {
+        approved: true,
+        ...(await matchFrameworkAgreements(ctx.client, input.prId, ctx.actor)),
+      };
+    }
+
+    await ctx.client.from('audit_logs').insert({
+      entity_type: 'purchase_request',
+      entity_id: input.prId,
+      action: approved ? 'approve' : 'reject',
+      actor: ctx.actor,
+      actor_role: ctx.role,
+      detail: {
+        from_status: existing.status,
+        to_status: newStatus,
+        note: input.note,
+        created_by_agent_action: true,
+        ...approvalResult,
+      },
+    });
+
+    const prResult = await ctx.client
+      .from('purchase_requests')
+      .select('*')
+      .eq('id', input.prId)
+      .single();
+    fullPR = prResult.data;
+
+    const linesResult = await ctx.client
+      .from('purchase_request_lines')
+      .select('*')
       .eq('request_id', input.prId);
-
-    approvalResult = {
-      approved: true,
-      ...(await matchFrameworkAgreements(ctx.client, input.prId, ctx.actor)),
-    };
+    lines = linesResult.data;
   }
-
-  await ctx.client.from('audit_logs').insert({
-    entity_type: 'purchase_request',
-    entity_id: input.prId,
-    action: approved ? 'approve' : 'reject',
-    actor: ctx.actor,
-    actor_role: ctx.role,
-    detail: {
-      from_status: existing.status,
-      to_status: newStatus,
-      note: input.note,
-      created_by_agent_action: true,
-      ...approvalResult,
-    },
-  });
-
-  const { data: fullPR } = await ctx.client
-    .from('purchase_requests')
-    .select('*')
-    .eq('id', input.prId)
-    .single();
-
-  const { data: lines } = await ctx.client
-    .from('purchase_request_lines')
-    .select('*')
-    .eq('request_id', input.prId);
 
   emitPRApproved(
     {
