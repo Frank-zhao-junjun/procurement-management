@@ -306,6 +306,46 @@ POST /api/agent-actions/submit-contract-for-approval
 - 自动写审计日志
 - 自动通知 Manager Agent
 
+### 7. 提交 PR（独立动作）
+
+```bash
+POST /api/agent-actions/submit-pr
+{
+  "prId": 15
+}
+```
+
+**行为说明**：
+- 将已创建的草稿 PR 提交到审批流
+- 适合在 `create-pr-from-material-check` 未启用 `autoSubmit` 时继续推进
+
+### 8. 审批超收（独立动作）
+
+```bash
+POST /api/agent-actions/approve-overdelivery
+{
+  "goodsReceiptId": 21,
+  "approved": true,
+  "note": "允许超收"
+}
+```
+
+**行为说明**：
+- 仅 Manager 可调用
+- 审批待处理的超收收货单
+- 适合在 `receive-goods-and-handle-overdelivery` 返回超收待审批后继续调用
+
+### 9. 动作清单发现接口
+
+```bash
+GET /api/agent-actions/manifest
+```
+
+**行为说明**：
+- 返回所有 agent action 的机器可读清单
+- 包含动作名、说明、是否支持幂等、输入字段要求
+- 适合 SDK / CLI / MCP 自动发现能力
+
 ### 统一响应格式
 
 所有 Agent 高层动作接口统一返回：
@@ -348,6 +388,18 @@ POST /api/agent-actions/submit-contract-for-approval
 - 请求体：`requestId` / `request_id` / `idempotencyKey`
 
 同一 `actor + action + idempotencyKey` 重复调用时，系统会直接返回上次成功结果，避免因 Agent 重试导致重复建单、重复提交或重复收货。
+
+### 一致性与假成功防护
+
+对于关键多表写入动作（如创建 PR、创建 PO、收货），系统会在返回成功前执行写后校验：
+
+- Header 已写入但 Items 未写入 → 视为失败，并尝试回滚 Header
+- 单据号已生成但主记录未成功落库 → 不返回成功
+- 关键写入校验失败时 → 返回错误，不向 Agent 谎报“已成功”
+
+**结论**：
+- 你提到的“只拿到新单据号，但数据库里并没有真正写入，还回成功”的情况，后续应显著降低
+- “Header 成功而 Items 未写入还回成功”的情况，关键动作里已按失败处理并补偿回滚
 
 ### 0. 物料匹配检查（推荐第一步）
 

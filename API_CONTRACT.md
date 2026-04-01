@@ -172,6 +172,9 @@ const prId = body.prId; // 如果前端传 pr_id 就获取不到
 | `POST /api/agent-actions/confirm-fa-and-create-po` | 确认或拒绝 FA 匹配，必要时自动建 PO 或创建寻源任务 | buyer agent |
 | `POST /api/agent-actions/receive-goods-and-handle-overdelivery` | 创建收货单，并在超收时自动返回待审批结果 | buyer / manager agent |
 | `POST /api/agent-actions/submit-contract-for-approval` | 提交框架协议进入审批并通知 manager | buyer / manager agent |
+| `POST /api/agent-actions/submit-pr` | 提交已创建的采购申请进入审批流 | requester / buyer agent |
+| `POST /api/agent-actions/approve-overdelivery` | 审批超收收货单 | manager agent |
+| `GET /api/agent-actions/manifest` | 返回动作清单、用途、幂等支持与输入字段定义 | all agents |
 
 ### 错误处理约定
 
@@ -220,6 +223,13 @@ Agent 高层动作接口应支持以下任一幂等键来源：
 - 请求体：`requestId`
 
 同一 `actor + action + idempotency key` 的重复请求，应直接返回上次成功结果，避免重复建单、重复提交、重复收货。
+
+### 写入一致性约定
+
+- 对关键多表动作（如 PR 创建、PO 创建、FA 确认建 PO、收货）应执行写后校验
+- 只有在 header / lines 等关键记录都验证存在后，才允许返回 `success: true`
+- 如果 header 已创建但 lines 校验失败，服务端应补偿删除已写入 header，避免出现“表头成功、行项目失败但仍返回成功”的半成功状态
+- 因此，Agent 不应再仅以“拿到单据号”判断成功，而应以接口返回的 `success=true` 且 `data` 中关键实体存在为准
 
 ---
 

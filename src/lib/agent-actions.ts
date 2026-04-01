@@ -93,6 +93,16 @@ type SubmitContractForApprovalInput = {
   contractId: number;
 };
 
+type SubmitPRInput = {
+  prId: number;
+};
+
+type ApproveOverdeliveryInput = {
+  goodsReceiptId: number;
+  approved?: boolean;
+  note?: string;
+};
+
 type AgentActionName =
   | 'create-pr-from-material-check'
   | 'approve-pr-and-handle-fa'
@@ -100,6 +110,8 @@ type AgentActionName =
   | 'confirm-fa-and-create-po'
   | 'receive-goods-and-handle-overdelivery'
   | 'submit-contract-for-approval'
+  | 'submit-pr'
+  | 'approve-overdelivery'
   | 'submit-pr';
 
 type AgentActionNextStep = {
@@ -116,6 +128,111 @@ type AgentActionEnvelope<T> = {
   warnings: string[];
   statusCode?: number;
 };
+
+type VerificationResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: string };
+
+export type AgentActionManifestItem = {
+  action: AgentActionName;
+  description: string;
+  idempotent: boolean;
+  idempotencySources: Array<'Idempotency-Key' | 'requestId' | 'request_id' | 'idempotencyKey' | 'idempotency_key'>;
+  requiredRole: Array<Role | 'any_bound_actor'>;
+  inputSchema: Record<string, unknown>;
+  responseNotes: string[];
+};
+
+export const AGENT_ACTION_MANIFEST: AgentActionManifestItem[] = [
+  {
+    action: 'create-pr-from-material-check',
+    description: '检查物料、创建 PR，并可选自动提交',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['any_bound_actor'],
+    inputSchema: {
+      reason: 'string',
+      lines: 'array',
+      autoSubmit: 'boolean?',
+      createMissingMaterials: 'boolean?',
+      cancelledLines: 'number[]?',
+    },
+    responseNotes: ['可能返回 requiresConfirmation=true', 'nextActions 可能建议 submit-pr 或 approve-pr-and-handle-fa'],
+  },
+  {
+    action: 'submit-pr',
+    description: '提交已创建的采购申请进入审批流',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['requester', 'buyer'],
+    inputSchema: { prId: 'number' },
+    responseNotes: ['仅允许提交 draft 状态 PR'],
+  },
+  {
+    action: 'approve-pr-and-handle-fa',
+    description: '审批 PR 并自动处理 FA / 寻源 / 自动 PO',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['manager'],
+    inputSchema: { prId: 'number', approved: 'boolean?', note: 'string?' },
+    responseNotes: ['nextActions 可能建议 confirm-fa-and-create-po 或 create-po-from-awarded-quote'],
+  },
+  {
+    action: 'confirm-fa-and-create-po',
+    description: '确认或拒绝 FA 匹配，并按需创建 PO 或寻源任务',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['buyer', 'manager'],
+    inputSchema: { prLineId: 'number', faId: 'number?', confirmed: 'boolean?', autoCreatePO: 'boolean?' },
+    responseNotes: ['拒绝 FA 时会创建寻源任务', '确认后可自动创建 PO'],
+  },
+  {
+    action: 'create-po-from-awarded-quote',
+    description: '授标报价单并自动创建 PO',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['buyer', 'manager'],
+    inputSchema: { quoteId: 'number' },
+    responseNotes: ['会同步更新 sourcing task 和 PR line'],
+  },
+  {
+    action: 'receive-goods-and-handle-overdelivery',
+    description: '执行收货，并在超收时返回待审批或自动审批结果',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['buyer', 'manager'],
+    inputSchema: {
+      poLineId: 'number',
+      poId: 'number?',
+      quantity: 'number',
+      grType: '"in" | "out"?',
+      receiptDate: 'string?',
+      notes: 'string?',
+      autoApproveOverdelivery: 'boolean?',
+      overdeliveryApproval: 'boolean?',
+      approvalNote: 'string?',
+    },
+    responseNotes: ['超收时 warnings 会提示审批', 'nextActions 可能建议 approve-overdelivery'],
+  },
+  {
+    action: 'approve-overdelivery',
+    description: '审批或拒绝超收收货单',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['manager'],
+    inputSchema: { goodsReceiptId: 'number', approved: 'boolean?', note: 'string?' },
+    responseNotes: ['仅处理 pending_approval 状态的收货单'],
+  },
+  {
+    action: 'submit-contract-for-approval',
+    description: '提交合同进入审批并通知 manager',
+    idempotent: true,
+    idempotencySources: ['Idempotency-Key', 'requestId', 'request_id', 'idempotencyKey', 'idempotency_key'],
+    requiredRole: ['buyer', 'manager'],
+    inputSchema: { contractId: 'number' },
+    responseNotes: ['仅允许 draft 合同提交'],
+  },
+];
 
 function makeActionResponse<T>(
   action: AgentActionName,
@@ -135,6 +252,39 @@ function makeActionResponse<T>(
     warnings: options.warnings ?? [],
     statusCode: options.statusCode,
   };
+}
+
+async function verifySingleRowExists(
+  client: DBClient,
+  table: string,
+  id: number,
+): Promise<VerificationResult<Record<string, unknown>>> {
+  const { data, error } = await client.from(table).select('*').eq('id', id).single();
+  if (error || !data) {
+    return {
+      ok: false,
+      reason: `写后校验失败: ${table}#${id} 未成功落库`,
+    };
+  }
+  return { ok: true, data: data as Record<string, unknown> };
+}
+
+async function verifyRowsByField(
+  client: DBClient,
+  table: string,
+  field: string,
+  value: number,
+  expectedCount: number,
+): Promise<VerificationResult<Record<string, unknown>[]>> {
+  const { data, error } = await client.from(table).select('*').eq(field, value);
+  const rows = (data || []) as Record<string, unknown>[];
+  if (error || rows.length !== expectedCount) {
+    return {
+      ok: false,
+      reason: `写后校验失败: ${table}.${field}=${value} 期望 ${expectedCount} 行，实际 ${rows.length} 行`,
+    };
+  }
+  return { ok: true, data: rows };
 }
 
 type IdempotentHandlerOptions = {
@@ -459,6 +609,26 @@ async function createPurchaseRequestWithResolvedMaterials(
     throw new Error(linesError.message);
   }
 
+  const prVerify = await verifySingleRowExists(ctx.client, 'purchase_requests', pr.id);
+  if (!prVerify.ok) {
+    await ctx.client.from('purchase_request_lines').delete().eq('request_id', pr.id);
+    await ctx.client.from('purchase_requests').delete().eq('id', pr.id);
+    throw new Error(prVerify.reason);
+  }
+
+  const prLinesVerify = await verifyRowsByField(
+    ctx.client,
+    'purchase_request_lines',
+    'request_id',
+    pr.id,
+    prLines.length,
+  );
+  if (!prLinesVerify.ok) {
+    await ctx.client.from('purchase_request_lines').delete().eq('request_id', pr.id);
+    await ctx.client.from('purchase_requests').delete().eq('id', pr.id);
+    throw new Error(prLinesVerify.reason);
+  }
+
   await ctx.client.from('audit_logs').insert({
     entity_type: 'purchase_request',
     entity_id: pr.id,
@@ -638,6 +808,20 @@ async function createAutoPO(
     if (linesError) {
       await client.from('purchase_orders').delete().eq('id', po.id);
       console.error('[AgentAction] Failed to insert auto PO lines:', linesError);
+      continue;
+    }
+
+    const poVerify = await verifySingleRowExists(client, 'purchase_orders', po.id);
+    const poLinesVerify = await verifyRowsByField(client, 'purchase_order_lines', 'order_id', po.id, poLines.length);
+    if (!poVerify.ok || !poLinesVerify.ok) {
+      await client.from('purchase_order_lines').delete().eq('order_id', po.id);
+      await client.from('purchase_orders').delete().eq('id', po.id);
+      const verifyReason = !poVerify.ok
+        ? poVerify.reason
+        : !poLinesVerify.ok
+          ? poLinesVerify.reason
+          : 'unknown verification error';
+      console.error('[AgentAction] Auto PO verification failed:', verifyReason);
       continue;
     }
 
@@ -1303,10 +1487,43 @@ export async function createActionContext(client: any, request: Request): Promis
   };
 }
 
+export async function submitPRAction(
+  ctx: ActionContext,
+  input: SubmitPRInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
+  const submission = await submitPurchaseRequest(ctx, input.prId);
+  const data = {
+    prId: input.prId,
+    submission,
+  };
+  return wrapActionResult('submit-pr', data, {
+    nextActions: inferNextActions('create-pr-from-material-check', {
+      submitted: submission?.submitted,
+    }),
+    statusCode: submission?.submitted ? 200 : 200,
+  });
+}
+
+export async function approveOverdelivery(
+  ctx: ActionContext,
+  input: ApproveOverdeliveryInput,
+): Promise<AgentActionEnvelope<Record<string, unknown>>> {
+  const approved = input.approved !== false;
+  const approval = await approveOverdeliveryInAction(ctx, input.goodsReceiptId, approved, input.note);
+  const data = {
+    goodsReceiptId: input.goodsReceiptId,
+    approval,
+  };
+  return wrapActionResult('approve-overdelivery', data, {
+    statusCode: 200,
+  });
+}
+
 function wrapActionResult<T>(
   action: AgentActionName,
   data: T,
   options: {
+    statusCode?: number;
     nextActions?: AgentActionNextStep[];
     warnings?: string[];
   } = {},
