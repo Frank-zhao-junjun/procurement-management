@@ -10,7 +10,7 @@
  */
 
 import { getSupabaseClient } from '@/storage/database';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 
 // 配置
 const WEBHOOK_TIMEOUT = 10000; // 10秒超时
@@ -33,8 +33,7 @@ function getWebhookSecret(): string | null {
  * 生成 HMAC-SHA256 签名
  */
 function generateSignature(body: string, secret: string): string {
-  const crypto = require('crypto');
-  return crypto.createHmac('sha256', secret).update(body).digest('hex');
+  return createHmac('sha256', secret).update(body).digest('hex');
 }
 
 /**

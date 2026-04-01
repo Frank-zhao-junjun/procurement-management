@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
 import {
-  canAccessGoodsReceipt,
   canReceiveGoods,
   filterGoodsReceipts,
   getUserIdentityWithLookup,
