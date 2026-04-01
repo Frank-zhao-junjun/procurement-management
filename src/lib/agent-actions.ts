@@ -993,6 +993,245 @@ async function tryCreatePOInTransaction(
   }
 }
 
+async function calculateNextPOStatusInTransaction(pg: PgClient, poId: number): Promise<string> {
+  const poLines = await pg.query(
+    'SELECT status FROM purchase_order_lines WHERE order_id = $1',
+    [poId],
+  );
+
+  const statuses = poLines.rows.map((row) => String(row.status));
+  if (statuses.length === 0) return 'draft';
+  if (statuses.every((status) => status === 'received')) return 'received';
+  if (statuses.some((status) => status === 'partial_received' || status === 'received')) return 'partial';
+  if (statuses.every((status) => status === 'ordered')) return 'sent';
+  return 'draft';
+}
+
+async function tryReceiveGoodsInTransaction(
+  ctx: ActionContext,
+  input: {
+    poLineId: number;
+    poId?: number;
+    quantity: number;
+    grType: 'in' | 'out';
+    receiptDate: string;
+    receiptTime: string;
+    notes?: string;
+    autoApproveOverdelivery?: boolean;
+    overdeliveryApproval?: boolean;
+    approvalNote?: string;
+  },
+): Promise<
+  | {
+      goodsReceipt: Record<string, unknown>;
+      requiresApproval: boolean;
+      approval: Record<string, unknown> | null;
+      transaction_mode: 'pg';
+      warning?: string;
+    }
+  | null
+> {
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const pg = new PgClient({ connectionString: databaseUrl });
+  await pg.connect();
+
+  try {
+    await pg.query('BEGIN');
+
+    const poLineResult = await pg.query(
+      'SELECT * FROM purchase_order_lines WHERE id = $1 FOR UPDATE',
+      [input.poLineId],
+    );
+    if (!poLineResult.rowCount || !poLineResult.rows[0]) {
+      throw new Error(`采购订单行不存在 (ID: ${input.poLineId})`);
+    }
+
+    const poLine = poLineResult.rows[0] as Record<string, unknown>;
+    const poId = Number(input.poId ?? poLine.order_id);
+    const poHeaderResult = await pg.query(
+      'SELECT * FROM purchase_orders WHERE id = $1 FOR UPDATE',
+      [poId],
+    );
+    if (!poHeaderResult.rowCount || !poHeaderResult.rows[0]) {
+      throw new Error(`采购订单不存在 (ID: ${poId})`);
+    }
+
+    const orderQty = Number(poLine.quantity);
+    const currentReceived = Number(poLine.received_qty || 0);
+    const newReceivedQty =
+      input.grType === 'out'
+        ? Math.max(0, currentReceived - input.quantity)
+        : currentReceived + input.quantity;
+    const pendingQty = Math.max(0, orderQty - newReceivedQty);
+
+    let isOverdelivery = false;
+    let overdeliveryRatio = 0;
+    if (input.grType === 'in' && newReceivedQty > orderQty) {
+      overdeliveryRatio = (newReceivedQty - orderQty) / orderQty;
+      isOverdelivery = overdeliveryRatio > 0.05;
+    }
+
+    const grNumber = await numberGenerators[input.grType === 'out' ? 'rt' : 'gr']();
+    const insertGR = await pg.query(
+      `INSERT INTO goods_receipts (
+        gr_number, po_id, po_line_id, gr_type, quantity, receipt_date, receipt_time,
+        receiver, notes, status, is_overdelivery, overdelivery_ratio, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+      RETURNING *`,
+      [
+        grNumber,
+        poId,
+        input.poLineId,
+        input.grType,
+        input.quantity,
+        input.receiptDate,
+        input.receiptTime,
+        ctx.actor,
+        input.notes || null,
+        isOverdelivery ? 'pending_approval' : 'completed',
+        isOverdelivery,
+        overdeliveryRatio,
+      ],
+    );
+
+    if (!insertGR.rowCount || !insertGR.rows[0]) {
+      throw new Error('事务内创建收货单失败');
+    }
+
+    const goodsReceipt = insertGR.rows[0] as Record<string, unknown>;
+    let approval: Record<string, unknown> | null = null;
+    let warning: string | undefined;
+
+    if (isOverdelivery) {
+      warning = '超收超过5%，需要 Manager 审批';
+
+      if (input.autoApproveOverdelivery && canApprove(ctx.role)) {
+        const approved = input.overdeliveryApproval !== false;
+        if (approved) {
+          const lineStatus = pendingQty === 0 ? 'received' : 'partial_received';
+          await pg.query(
+            `UPDATE goods_receipts
+             SET status = 'approved', approved_by = $1, approved_at = NOW()
+             WHERE id = $2`,
+            [ctx.actor, goodsReceipt.id],
+          );
+          await pg.query(
+            `UPDATE purchase_order_lines
+             SET received_qty = $1, pending_qty = $2, status = $3, updated_at = NOW()
+             WHERE id = $4`,
+            [newReceivedQty, pendingQty, lineStatus, input.poLineId],
+          );
+
+          const nextPOStatus = await calculateNextPOStatusInTransaction(pg, poId);
+          await pg.query(
+            `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE id = $2`,
+            [nextPOStatus, poId],
+          );
+
+          if (poLine.pr_line_id) {
+            await pg.query(
+              `UPDATE purchase_request_lines
+               SET progress = $1, updated_at = NOW()
+               WHERE id = $2`,
+              [pendingQty === 0 ? 'received' : 'partial_received', Number(poLine.pr_line_id)],
+            );
+          }
+
+          approval = {
+            goodsReceiptId: goodsReceipt.id,
+            approved: true,
+            status: 'approved',
+            note: input.approvalNote,
+            newReceivedQty,
+            pendingQty,
+            lineStatus,
+          };
+        } else {
+          await pg.query(
+            `UPDATE goods_receipts
+             SET status = 'rejected', approved_by = $1, approved_at = NOW()
+             WHERE id = $2`,
+            [ctx.actor, goodsReceipt.id],
+          );
+          approval = {
+            goodsReceiptId: goodsReceipt.id,
+            approved: false,
+            status: 'rejected',
+            note: input.approvalNote,
+          };
+        }
+      }
+    } else {
+      const lineStatus = pendingQty === 0 ? 'received' : newReceivedQty > 0 ? 'partial_received' : 'ordered';
+      await pg.query(
+        `UPDATE purchase_order_lines
+         SET received_qty = $1, pending_qty = $2, status = $3, updated_at = NOW()
+         WHERE id = $4`,
+        [newReceivedQty, pendingQty, lineStatus, input.poLineId],
+      );
+
+      const nextPOStatus = await calculateNextPOStatusInTransaction(pg, poId);
+      await pg.query(
+        `UPDATE purchase_orders SET status = $1, updated_at = NOW() WHERE id = $2`,
+        [nextPOStatus, poId],
+      );
+
+      if (poLine.pr_line_id) {
+        await pg.query(
+          `UPDATE purchase_request_lines
+           SET progress = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [pendingQty === 0 ? 'received' : 'partial_received', Number(poLine.pr_line_id)],
+        );
+      }
+    }
+
+    await pg.query(
+      `INSERT INTO audit_logs (
+        entity_type, entity_id, action, actor, actor_role, detail, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+      [
+        'goods_receipt',
+        Number(goodsReceipt.id),
+        input.grType === 'out' ? 'return' : 'receive',
+        ctx.actor,
+        ctx.role,
+        JSON.stringify({
+          gr_number: grNumber,
+          po_id: poId,
+          po_line_id: input.poLineId,
+          quantity: input.quantity,
+          gr_type: input.grType,
+          receipt_date: input.receiptDate,
+          new_received_qty: newReceivedQty,
+          pending_qty: pendingQty,
+          transaction_mode: 'pg',
+          created_by_agent_action: true,
+        }),
+      ],
+    );
+
+    await pg.query('COMMIT');
+
+    return {
+      goodsReceipt,
+      requiresApproval: isOverdelivery && !approval,
+      approval,
+      transaction_mode: 'pg',
+      warning,
+    };
+  } catch (error) {
+    await pg.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pg.end();
+  }
+}
+
 async function submitPurchaseRequest(ctx: ActionContext, prId: number) {
   if (ctx.role === 'manager') {
     throw new Error('Manager 不能提交采购申请');
@@ -2420,6 +2659,78 @@ export async function receiveGoodsAndHandleOverdelivery(
     second: '2-digit',
     hour12: false,
   }).format(new Date());
+
+  const transactionalReceipt = await tryReceiveGoodsInTransaction(ctx, {
+    poLineId,
+    poId: input.poId,
+    quantity: grQuantity,
+    grType,
+    receiptDate,
+    receiptTime,
+    notes: input.notes,
+    autoApproveOverdelivery: input.autoApproveOverdelivery,
+    overdeliveryApproval: input.overdeliveryApproval,
+    approvalNote: input.approvalNote,
+  });
+
+  if (transactionalReceipt) {
+    const warnings = transactionalReceipt.warning ? [transactionalReceipt.warning] : [];
+    const data = {
+      goodsReceipt: transactionalReceipt.goodsReceipt,
+      requiresApproval: transactionalReceipt.requiresApproval && !transactionalReceipt.approval,
+      approval: transactionalReceipt.approval,
+      transaction_mode: transactionalReceipt.transaction_mode,
+      overdeliveryRatio: transactionalReceipt.requiresApproval
+        ? transactionalReceipt.goodsReceipt.overdelivery_ratio ?? null
+        : null,
+    };
+
+    if (transactionalReceipt.requiresApproval) {
+      emitGROverdelivery(
+        {
+          grId: Number(transactionalReceipt.goodsReceipt.id),
+          grNumber: String(transactionalReceipt.goodsReceipt.gr_number),
+          poId: Number(transactionalReceipt.goodsReceipt.po_id),
+          poNumber: '',
+          poLineId: Number(transactionalReceipt.goodsReceipt.po_line_id),
+          materialSnapshot: '',
+          orderedQty: 0,
+          receivedQty: 0,
+          overdeliveryQty: 0,
+          overdeliveryRatio: Number(transactionalReceipt.goodsReceipt.overdelivery_ratio || 0),
+          grStatus: String(transactionalReceipt.goodsReceipt.status) as 'pending_approval' | 'approved' | 'rejected',
+          actor: ctx.actor,
+          actorRole: ctx.role,
+        },
+        'agent_action_receive_goods',
+      ).catch((error) => console.error('[AgentAction] Failed to emit GR_OVERDELIVERY:', error));
+    } else {
+      emitGRCompleted(
+        {
+          grId: Number(transactionalReceipt.goodsReceipt.id),
+          grNumber: String(transactionalReceipt.goodsReceipt.gr_number),
+          poId: Number(transactionalReceipt.goodsReceipt.po_id),
+          poNumber: '',
+          poLineId: Number(transactionalReceipt.goodsReceipt.po_line_id),
+          materialSnapshot: '',
+          orderedQty: 0,
+          receivedQty: grQuantity,
+          cumulativeReceivedQty: 0,
+          pendingQty: 0,
+          isFullyReceived: false,
+          overdeliveryRatio: undefined,
+          actor: ctx.actor,
+          actorRole: ctx.role,
+        },
+        'agent_action_receive_goods',
+      ).catch((error) => console.error('[AgentAction] Failed to emit GR_COMPLETED:', error));
+    }
+
+    return wrapActionResult('receive-goods-and-handle-overdelivery', data, {
+      nextActions: inferNextActions('receive-goods-and-handle-overdelivery', data),
+      warnings,
+    });
+  }
 
   const { data: poLine, error: poLineError } = await ctx.client
     .from('purchase_order_lines')
