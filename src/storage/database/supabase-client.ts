@@ -7,6 +7,7 @@ interface SupabaseCredentials {
   url: string;
   anonKey: string;
   serviceRoleKey?: string;
+  databaseUrl?: string;
 }
 
 function loadEnv(): void {
@@ -74,6 +75,7 @@ function getSupabaseCredentials(): SupabaseCredentials {
   const url = process.env.COZE_SUPABASE_URL;
   const anonKey = process.env.COZE_SUPABASE_ANON_KEY;
   const serviceRoleKey = process.env.COZE_SUPABASE_SERVICE_ROLE_KEY;
+  const databaseUrl = process.env.DATABASE_URL;
 
   if (!url) {
     throw new Error('COZE_SUPABASE_URL is not set');
@@ -82,7 +84,12 @@ function getSupabaseCredentials(): SupabaseCredentials {
     throw new Error('COZE_SUPABASE_ANON_KEY is not set');
   }
 
-  return { url, anonKey, serviceRoleKey };
+  return { url, anonKey, serviceRoleKey, databaseUrl };
+}
+
+function getDatabaseUrl(): string | null {
+  loadEnv();
+  return process.env.DATABASE_URL || null;
 }
 
 function getSupabaseClient(token?: string): SupabaseClient {
@@ -132,4 +139,4 @@ function getServiceRoleClient(): SupabaseClient {
   });
 }
 
-export { loadEnv, getSupabaseCredentials, getSupabaseClient, getServiceRoleClient };
+export { loadEnv, getSupabaseCredentials, getDatabaseUrl, getSupabaseClient, getServiceRoleClient };

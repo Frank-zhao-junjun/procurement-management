@@ -389,6 +389,12 @@ GET /api/agent-actions/manifest
 
 同一 `actor + action + idempotencyKey` 重复调用时，系统会直接返回上次成功结果，避免因 Agent 重试导致重复建单、重复提交或重复收货。
 
+### 事务与一致性说明
+
+- 创建 PR（header + items）会优先尝试使用 `DATABASE_URL` 走真实数据库事务
+- 若当前环境未提供 `DATABASE_URL`，则回退为“写后校验 + 补偿回滚”模式
+- 因此在支持直连数据库的部署环境中，PR 创建的一致性会进一步提升，显著降低 header/lines 半成功风险
+
 ### 一致性与假成功防护
 
 对于关键多表写入动作（如创建 PR、创建 PO、收货），系统会在返回成功前执行写后校验：

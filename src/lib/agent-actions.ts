@@ -1,3 +1,5 @@
+import { Client as PgClient } from 'pg';
+import { getDatabaseUrl } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
 import { getBeijingISOString } from '@/lib/datetime';
 import {
@@ -536,6 +538,11 @@ async function createPurchaseRequestWithResolvedMaterials(
     };
   }
 
+  const transactionalResult = await tryCreatePurchaseRequestInTransaction(ctx, reason, activeLines);
+  if (transactionalResult) {
+    return transactionalResult;
+  }
+
   const createdMaterials: any[] = [];
   for (const line of activeLines) {
     if (line.confirmedMaterialId || !line.confirmedMaterialName) continue;
@@ -657,6 +664,148 @@ async function createPurchaseRequestWithResolvedMaterials(
       new_materials: createdMaterials,
     },
   };
+}
+
+async function tryCreatePurchaseRequestInTransaction(
+  ctx: ActionContext,
+  reason: string,
+  activeLines: MaterialCheckInputLine[],
+): Promise<
+  | {
+      created: true;
+      data: Record<string, unknown>;
+    }
+  | null
+> {
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const pg = new PgClient({ connectionString: databaseUrl });
+  await pg.connect();
+
+  try {
+    await pg.query('BEGIN');
+
+    const resolvedLines = [...activeLines];
+    const createdMaterials: Array<Record<string, unknown>> = [];
+
+    for (const line of resolvedLines) {
+      if (line.confirmedMaterialId || !line.confirmedMaterialName) continue;
+
+      const existingMaterial = await pg.query(
+        'SELECT id, name, unit FROM materials WHERE name = $1 AND is_active = true LIMIT 1',
+        [line.confirmedMaterialName],
+      );
+
+      if (existingMaterial.rowCount && existingMaterial.rows[0]) {
+        line.confirmedMaterialId = existingMaterial.rows[0].id as number;
+        continue;
+      }
+
+      const insertMaterial = await pg.query(
+        `INSERT INTO materials (name, code, unit, is_active, created_at)
+         VALUES ($1, $2, $3, true, NOW())
+         RETURNING id, code, name, unit`,
+        [line.confirmedMaterialName, `NEW-${Date.now()}`, line.confirmedMaterialUnit || '个'],
+      );
+
+      if (!insertMaterial.rowCount || !insertMaterial.rows[0]) {
+        throw new Error('事务内创建物料失败');
+      }
+
+      line.confirmedMaterialId = insertMaterial.rows[0].id as number;
+      createdMaterials.push(insertMaterial.rows[0] as Record<string, unknown>);
+    }
+
+    const prNumber = await numberGenerators.pr();
+    const linesSnapshot = JSON.stringify(resolvedLines);
+
+    const insertPR = await pg.query(
+      `INSERT INTO purchase_requests (
+        pr_number, applicant, applicant_role, reason, status, lines_snapshot, created_at
+      ) VALUES ($1, $2, $3, $4, 'draft', $5, NOW())
+      RETURNING *`,
+      [prNumber, ctx.actor, ctx.role, reason, linesSnapshot],
+    );
+
+    if (!insertPR.rowCount || !insertPR.rows[0]) {
+      throw new Error('事务内创建采购申请失败');
+    }
+
+    const pr = insertPR.rows[0] as Record<string, unknown>;
+    const prId = Number(pr.id);
+    if (!Number.isInteger(prId) || prId <= 0) {
+      throw new Error('事务内创建采购申请后未返回有效 ID');
+    }
+
+    for (let index = 0; index < resolvedLines.length; index += 1) {
+      const line = resolvedLines[index];
+      await pg.query(
+        `INSERT INTO purchase_request_lines (
+          request_id, line_number, material_id, material_snapshot, requirement_text,
+          quantity, est_unit_price, expected_delivery_date, note, progress, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW())`,
+        [
+          prId,
+          index + 1,
+          line.confirmedMaterialId,
+          line.confirmedMaterialName || line.requirementText,
+          line.requirementText,
+          line.quantity,
+          line.estUnitPrice || null,
+          line.expectedDeliveryDate || null,
+          line.note || null,
+        ],
+      );
+    }
+
+    const linesCountResult = await pg.query(
+      'SELECT * FROM purchase_request_lines WHERE request_id = $1 ORDER BY line_number ASC',
+      [prId],
+    );
+    if (linesCountResult.rowCount !== resolvedLines.length) {
+      throw new Error('事务内 PR 行写入数量与预期不一致');
+    }
+
+    await pg.query(
+      `INSERT INTO audit_logs (
+        entity_type, entity_id, action, actor, actor_role, detail, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+      [
+        'purchase_request',
+        prId,
+        'create',
+        ctx.actor,
+        ctx.role,
+        JSON.stringify({
+          pr_number: prNumber,
+          lines_count: resolvedLines.length,
+          new_materials_created: createdMaterials.length,
+          created_by_agent_action: true,
+          transaction_mode: 'pg',
+        }),
+      ],
+    );
+
+    await pg.query('COMMIT');
+
+    return {
+      created: true,
+      data: {
+        ...pr,
+        lines: linesCountResult.rows,
+        new_materials: createdMaterials,
+        transaction_mode: 'pg',
+      },
+    };
+  } catch (error) {
+    await pg.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pg.end();
+  }
 }
 
 async function submitPurchaseRequest(ctx: ActionContext, prId: number) {

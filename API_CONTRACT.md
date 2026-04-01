@@ -230,6 +230,7 @@ Agent 高层动作接口应支持以下任一幂等键来源：
 - 只有在 header / lines 等关键记录都验证存在后，才允许返回 `success: true`
 - 如果 header 已创建但 lines 校验失败，服务端应补偿删除已写入 header，避免出现“表头成功、行项目失败但仍返回成功”的半成功状态
 - 因此，Agent 不应再仅以“拿到单据号”判断成功，而应以接口返回的 `success=true` 且 `data` 中关键实体存在为准
+- 对于 `create-pr-from-material-check`，若部署环境提供 `DATABASE_URL`，则应优先使用真实数据库事务完成 PR header + lines 写入；否则回退到写后校验 + 补偿删除策略
 
 ---
 
