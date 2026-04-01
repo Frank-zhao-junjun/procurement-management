@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { retryPOSend, explicitRetryPOSend } from '@/storage/database/po-sender';
-import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
+import { explicitRetryPOSend } from '@/storage/database/po-sender';
+import { canAccessPurchaseOrder, getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders/[id]/retry - 获取 PO 重试状态
 export async function GET(
@@ -11,11 +11,17 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
+    const poId = parseInt(id, 10);
+
+    if (!(await canAccessPurchaseOrder(client, role as Role, actor, poId))) {
+      return NextResponse.json({ error: '无权限查看该采购订单重试状态' }, { status: 403 });
+    }
 
     const { data, error } = await client
       .from('po_send_failures')
       .select('*')
-      .eq('po_id', parseInt(id, 10))
+      .eq('po_id', poId)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();

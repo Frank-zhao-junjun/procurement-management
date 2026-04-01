@@ -212,8 +212,9 @@ class EventBus {
     return sendWebhook(
       subscriber.webhook_url,
       event.type,
-      payload,
+      payload.data,
       {
+        payload,
         entityType: event.data.entity_type,
         entityId: event.data.entity_id,
       }

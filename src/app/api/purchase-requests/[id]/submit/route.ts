@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canAccessPurchaseRequest } from '@/lib/role-filter';
 import { emitPRSubmitted } from '@/lib/events';
 
 /**
@@ -15,12 +15,13 @@ export async function POST(
     const { id } = await params;
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
+    const requestId = parseInt(id, 10);
 
     // 检查当前状态
     const { data: existing, error: findError } = await client
       .from('purchase_requests')
       .select('*')
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .single();
 
     if (findError) {
@@ -29,6 +30,15 @@ export async function POST(
 
     if (!existing) {
       return NextResponse.json({ error: 'Purchase request not found' }, { status: 404 });
+    }
+
+    if (role === 'manager') {
+      return NextResponse.json({ error: 'Manager 不能提交采购申请' }, { status: 403 });
+    }
+
+    const canAccess = await canAccessPurchaseRequest(client, role, actor, requestId);
+    if (!canAccess) {
+      return NextResponse.json({ error: '无权提交该采购申请' }, { status: 403 });
     }
 
     if (existing.status !== 'draft') {
@@ -42,7 +52,7 @@ export async function POST(
     const { data: lines } = await client
       .from('purchase_request_lines')
       .select('*')
-      .eq('request_id', parseInt(id, 10));
+      .eq('request_id', requestId);
 
     if (!lines || lines.length === 0) {
       return NextResponse.json(
@@ -58,7 +68,7 @@ export async function POST(
         status: 'pending',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .select()
       .single();
 
@@ -69,7 +79,7 @@ export async function POST(
     // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'purchase_request',
-      entity_id: parseInt(id, 10),
+      entity_id: requestId,
       action: 'submit',
       actor,
       actor_role: role,
@@ -87,7 +97,7 @@ export async function POST(
         .single();
 
       eventResult = await emitPRSubmitted({
-        prId: parseInt(id, 10),
+        prId: requestId,
         prNumber: existing.pr_number,
         applicantId: existing.applicant,
         applicantName: profile?.full_name || undefined,

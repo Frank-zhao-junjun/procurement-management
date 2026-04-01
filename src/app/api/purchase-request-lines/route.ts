@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { canAccessPurchaseRequest, getRequesterAccessiblePRIds, getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-request-lines - 获取采购申请行列表
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const requestId = searchParams.get('requestId');
     const status = searchParams.get('status');
@@ -13,15 +14,31 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    // 所有 Agent 都可以查询任何行（移除角色过滤）
     let query = client
       .from('purchase_request_lines')
       .select('*, count:id', { count: 'exact' })
       .order('line_number', { ascending: true })
       .range(offset, offset + pageSize - 1);
 
+    if (role === 'requester') {
+      const accessiblePRIds = await getRequesterAccessiblePRIds(client, actor);
+      if (accessiblePRIds.length === 0) {
+        return NextResponse.json({
+          data: [],
+          total: 0,
+          page,
+          pageSize,
+        });
+      }
+      query = query.in('request_id', accessiblePRIds);
+    }
+
     if (requestId) {
-      query = query.eq('request_id', parseInt(requestId, 10));
+      const parsedRequestId = parseInt(requestId, 10);
+      if (!(await canAccessPurchaseRequest(client, role as Role, actor, parsedRequestId))) {
+        return NextResponse.json({ error: '无权限查看该采购申请行' }, { status: 403 });
+      }
+      query = query.eq('request_id', parsedRequestId);
     }
 
     if (status) {
@@ -54,10 +71,15 @@ export async function POST(request: NextRequest) {
 
     // 如果提供了 requestId，创建关联到采购申请的明细行
     if (body.request_id) {
+      const requestId = Number(body.request_id);
+      if (!(await canAccessPurchaseRequest(client, role as Role, actor, requestId))) {
+        return NextResponse.json({ error: '无权限修改该采购申请' }, { status: 403 });
+      }
+
       const { data, error } = await client
         .from('purchase_request_lines')
         .insert({
-          request_id: body.request_id,
+          request_id: requestId,
           line_number: body.line_number || 1,
           material_id: body.material_id || null,
           material_snapshot: body.material_snapshot || body.materialName || '',
@@ -120,15 +142,20 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'request_id 参数必填' }, { status: 400 });
     }
 
+    const requestId = Number(body.request_id);
+    if (!(await canAccessPurchaseRequest(client, role as Role, actor, requestId))) {
+      return NextResponse.json({ error: '无权限修改该采购申请' }, { status: 403 });
+    }
+
     // 删除旧的行
     await client
       .from('purchase_request_lines')
       .delete()
-      .eq('request_id', body.request_id);
+      .eq('request_id', requestId);
 
     // 批量插入新行
     const linesToInsert = body.lines.map((line: any, index: number) => ({
-      request_id: body.request_id,
+      request_id: requestId,
       line_number: index + 1,
       material_id: line.material_id || line.materialId || null,
       material_snapshot: line.material_snapshot || line.materialSnapshot || line.materialName || '',

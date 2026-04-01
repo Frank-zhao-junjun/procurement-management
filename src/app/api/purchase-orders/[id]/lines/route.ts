@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
+import { canAccessPurchaseOrder, getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-orders/[id]/lines - 获取订单行列表
 export async function GET(
@@ -10,7 +10,12 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const poId = parseInt(id, 10);
+
+    if (!(await canAccessPurchaseOrder(client, role as Role, actor, poId))) {
+      return NextResponse.json({ error: '无权限查看该采购订单' }, { status: 403 });
+    }
 
     // 验证订单存在
     const { data: po, error: poError } = await client

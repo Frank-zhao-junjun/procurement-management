@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { canAccessPurchaseRequest, getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/purchase-requests/[id] - 获取单个采购申请
 export async function GET(
@@ -10,12 +10,17 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
+    const requestId = parseInt(id, 10);
 
-    // 所有 Agent 都可以查询任何采购申请（移除角色过滤）
+    if (!(await canAccessPurchaseRequest(client, role as Role, actor, requestId))) {
+      return NextResponse.json({ error: '无权限查看该采购申请' }, { status: 403 });
+    }
+
     const { data, error } = await client
       .from('purchase_requests')
       .select('*')
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .single();
 
     if (error) {
@@ -29,7 +34,7 @@ export async function GET(
     const { data: lines } = await client
       .from('purchase_request_lines')
       .select('*')
-      .eq('request_id', parseInt(id, 10));
+      .eq('request_id', requestId);
 
     return NextResponse.json({ data: { ...data, purchase_request_lines: lines } });
   } catch (error: any) {
@@ -47,12 +52,17 @@ export async function PUT(
     const client = getSupabaseClient();
     const body = await request.json();
     const { actor, role } = await getUserIdentityWithLookup(request);
+    const requestId = parseInt(id, 10);
+
+    if (!(await canAccessPurchaseRequest(client, role as Role, actor, requestId))) {
+      return NextResponse.json({ error: '无权限修改该采购申请' }, { status: 403 });
+    }
 
     // 检查当前状态
     const { data: existing, error: findError } = await client
       .from('purchase_requests')
       .select('id, status')
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .single();
 
     if (findError) {
@@ -79,7 +89,7 @@ export async function PUT(
     const { data, error } = await client
       .from('purchase_requests')
       .update(updateData)
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .select()
       .single();
 
@@ -93,11 +103,11 @@ export async function PUT(
       await client
         .from('purchase_request_lines')
         .delete()
-        .eq('request_id', parseInt(id, 10));
+        .eq('request_id', requestId);
 
       // 插入新行
       const lines = body.lines.map((line: any, index: number) => ({
-        request_id: parseInt(id, 10),
+        request_id: requestId,
         line_number: index + 1,
         material_id: line.materialId || null,
         material_snapshot: line.materialSnapshot || line.requirementText,
@@ -116,12 +126,12 @@ export async function PUT(
     const { data: lines } = await client
       .from('purchase_request_lines')
       .select('*')
-      .eq('request_id', parseInt(id, 10));
+      .eq('request_id', requestId);
 
     // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'purchase_request',
-      entity_id: parseInt(id, 10),
+      entity_id: requestId,
       action: 'update',
       actor,
       actor_role: role,
@@ -143,12 +153,17 @@ export async function DELETE(
     const { id } = await params;
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
+    const requestId = parseInt(id, 10);
+
+    if (!(await canAccessPurchaseRequest(client, role as Role, actor, requestId))) {
+      return NextResponse.json({ error: '无权限删除该采购申请' }, { status: 403 });
+    }
 
     // 检查状态
     const { data: existing } = await client
       .from('purchase_requests')
       .select('id, status')
-      .eq('id', parseInt(id, 10))
+      .eq('id', requestId)
       .single();
 
     if (existing && existing.status !== 'draft') {
@@ -161,12 +176,12 @@ export async function DELETE(
     await client
       .from('purchase_requests')
       .delete()
-      .eq('id', parseInt(id, 10));
+      .eq('id', requestId);
 
     // 记录审计日志
     await client.from('audit_logs').insert({
       entity_type: 'purchase_request',
-      entity_id: parseInt(id, 10),
+      entity_id: requestId,
       action: 'delete',
       actor,
       actor_role: role,

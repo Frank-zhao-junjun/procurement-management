@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient, getServiceRoleClient } from '@/storage/database';
 import { generateGRNumber } from '@/storage/database/number-generator';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import {
+  canAccessGoodsReceipt,
+  canReceiveGoods,
+  filterGoodsReceipts,
+  getUserIdentityWithLookup,
+  type Role,
+} from '@/lib/role-filter';
 import { getBeijingDateString, getBeijingTimeString, getBeijingISOString } from '@/lib/datetime';
 import { emitGRCompleted, emitGROverdelivery } from '@/lib/events';
 
@@ -12,6 +18,7 @@ const OVERDELIVERY_THRESHOLD = 0.05;
 export async function GET(request: NextRequest) {
   try {
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const searchParams = request.nextUrl.searchParams;
     const grType = searchParams.get('grType');
     const poId = searchParams.get('poId');
@@ -19,7 +26,6 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    // 所有 Agent 都可以查询任何收货单（移除角色过滤）
     let query = client
       .from('goods_receipts')
       .select('*', { count: 'exact' })
@@ -33,6 +39,8 @@ export async function GET(request: NextRequest) {
     if (poId) {
       query = query.eq('po_id', parseInt(poId, 10));
     }
+
+    query = filterGoodsReceipts(query, role as Role, actor);
 
     const { data, error, count } = await query;
 
@@ -60,6 +68,10 @@ export async function POST(request: NextRequest) {
     const serviceClient = getServiceRoleClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
+
+    if (!canReceiveGoods(role as Role)) {
+      return NextResponse.json({ error: '只有 Buyer 可以创建收货单' }, { status: 403 });
+    }
 
     // 支持多种参数格式（驼峰式和下划线式）
     // 日期格式: YYYY-MM-DD (北京时间)

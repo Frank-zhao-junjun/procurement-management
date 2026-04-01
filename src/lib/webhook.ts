@@ -61,6 +61,8 @@ export interface WebhookPayload {
   event_id: string;
   timestamp: string;
   data: Record<string, any>;
+  source?: string;
+  subscriber?: Record<string, any>;
 }
 
 /**
@@ -80,6 +82,7 @@ export async function sendWebhook(
     entityId?: string | number;
     webhookSecret?: string;
     retries?: number;
+    payload?: WebhookPayload;
   } = {}
 ): Promise<WebhookResult> {
   const {
@@ -87,14 +90,15 @@ export async function sendWebhook(
     entityId,
     webhookSecret,
     retries = MAX_RETRIES,
+    payload: providedPayload,
   } = options;
 
-  const eventId = generateUUID();
-  const timestamp = new Date().toISOString();
+  const eventId = providedPayload?.event_id || generateUUID();
+  const timestamp = providedPayload?.timestamp || new Date().toISOString();
   const startTime = Date.now();
 
   // 构建 payload
-  const payload: WebhookPayload = {
+  const payload: WebhookPayload = providedPayload || {
     schema_version: '1.0',
     event,
     event_id: eventId,

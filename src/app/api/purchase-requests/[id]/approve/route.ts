@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canApprove } from '@/lib/role-filter';
 import { emitPRApproved, emitSourcingTaskCreated, emitPOCreated } from '@/lib/events';
 
 // POST /api/purchase-requests/[id]/approve - 审批采购申请
@@ -14,6 +14,10 @@ export async function POST(
     const client = getSupabaseClient();
     const body = await request.json();
     const { actor, role } = await getUserIdentityWithLookup(request);
+
+    if (!canApprove(role)) {
+      return NextResponse.json({ error: '只有 Manager 可以审批采购申请' }, { status: 403 });
+    }
 
     const approved = body.approved !== false; // 默认批准
 

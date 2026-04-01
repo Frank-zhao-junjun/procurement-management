@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { numberGenerators } from '@/storage/database/number-generator';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import {
+  canCreatePO,
+  filterPurchaseOrders,
+  getRequesterAccessiblePOIds,
+  getUserIdentityWithLookup,
+  type Role,
+} from '@/lib/role-filter';
 import { emitPOCreated } from '@/lib/events';
 
 // GET /api/purchase-orders - 获取采购订单列表
@@ -16,7 +22,6 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    // 所有 Agent 都可以查询任何订单（移除角色过滤）
     let query = client
       .from('purchase_orders')
       .select('*', { count: 'exact' })
@@ -29,6 +34,21 @@ export async function GET(request: NextRequest) {
 
     if (supplierId) {
       query = query.eq('supplier_id', parseInt(supplierId, 10));
+    }
+
+    if (role === 'requester') {
+      const accessiblePOIds = await getRequesterAccessiblePOIds(client, actor);
+      if (accessiblePOIds.length === 0) {
+        return NextResponse.json({
+          data: [],
+          total: 0,
+          page,
+          pageSize,
+        });
+      }
+      query = query.in('id', accessiblePOIds);
+    } else {
+      query = filterPurchaseOrders(query, role as Role, actor);
     }
 
     const { data, error, count } = await query;
@@ -75,6 +95,10 @@ export async function POST(request: NextRequest) {
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
+
+    if (!canCreatePO(role as Role)) {
+      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建采购订单' }, { status: 403 });
+    }
 
     // 生成 PO 编号
     const poNumber = await numberGenerators.po();
@@ -131,7 +155,7 @@ export async function POST(request: NextRequest) {
         order_id: po.id,
         line_number: index + 1,
         pr_id: line.prId || line.pr_id || prId,
-        pr_line_id: line.prLineId || line.pr_line_id || null,
+        pr_line_id: line.prLineId || line.pr_line_id,
         material_id: line.materialId || line.material_id || null,
         material_snapshot: line.materialSnapshot || line.material_snapshot || 
           line.materialName || line.material_name || '',

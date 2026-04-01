@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database';
-import { sendPurchaseOrder, explicitRetryPOSend, getPendingRetries } from '@/storage/database/po-sender';
+import { sendPurchaseOrder } from '@/storage/database/po-sender';
 import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
 
 // POST /api/purchase-orders/[id]/send - 发送 PO 给供应商
@@ -10,7 +9,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { actor, role } = await getUserIdentityWithLookup(request);
+    const { role } = await getUserIdentityWithLookup(request);
 
     // 只有 buyer 和 manager 可以发送 PO
     if (!canCreatePO(role as Role)) {

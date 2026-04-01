@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { canAccessGoodsReceipt, getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
 
 // GET /api/goods-receipts/[id] - 获取收货单详情
 export async function GET(
@@ -10,9 +10,13 @@ export async function GET(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
+    const { actor, role } = await getUserIdentityWithLookup(request);
     const grId = parseInt(id, 10);
 
-    // 所有 Agent 都可以查询任何收货单（移除角色过滤）
+    if (!(await canAccessGoodsReceipt(client, role as Role, actor, grId))) {
+      return NextResponse.json({ error: '无权限查看该收货单' }, { status: 403 });
+    }
+
     const { data: gr, error: grError } = await client
       .from('goods_receipts')
       .select('*')

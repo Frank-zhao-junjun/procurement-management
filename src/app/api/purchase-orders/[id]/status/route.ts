@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup, canCreatePO, type Role } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, canAccessPurchaseOrder, canCreatePO, type Role } from '@/lib/role-filter';
 
 // PATCH /api/purchase-orders/[id]/status - 更新采购订单状态
 export async function PATCH(

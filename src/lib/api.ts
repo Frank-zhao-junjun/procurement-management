@@ -78,6 +78,12 @@ export const api = {
       body: data ? JSON.stringify(data) : undefined,
     }),
 
+  patch: <T>(endpoint: string, data?: unknown) =>
+    request<T>(endpoint, {
+      method: 'PATCH',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+
   delete: <T>(endpoint: string) =>
     request<T>(endpoint, { method: 'DELETE' }),
 };
@@ -115,7 +121,7 @@ export const purchaseOrdersApi = {
     api.post<{ data: any }>(`/purchase-orders/${id}/send`),
 
   updateStatus: (id: number, status: string) =>
-    api.post<{ data: any }>(`/purchase-orders/${id}/status`, { status }),
+    api.patch<{ data: any }>(`/purchase-orders/${id}/status`, { status }),
 };
 
 // 供应商 API

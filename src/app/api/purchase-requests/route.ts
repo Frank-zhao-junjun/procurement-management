@@ -15,8 +15,7 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
     const offset = (page - 1) * pageSize;
 
-    // 所有 Agent 都可以查询任何采购申请（移除角色过滤）
-    // 使用子查询获取行数
+    // 使用子查询获取行数，并按角色过滤可见性。
     let query = client
       .from('purchase_requests')
       .select(`
@@ -33,6 +32,8 @@ export async function GET(request: NextRequest) {
     if (applicant) {
       query = query.eq('applicant', applicant);
     }
+
+    query = filterPurchaseRequests(query, role as Role, actor);
 
     const { data, error, count } = await query;
 
