@@ -808,6 +808,191 @@ async function tryCreatePurchaseRequestInTransaction(
   }
 }
 
+async function tryCreatePOInTransaction(
+  ctx: ActionContext,
+  input: {
+    supplierId: number;
+    supplierSnapshot: string;
+    deliveryDate: string | null;
+    status: 'draft' | 'sent';
+    prId?: number | null;
+    prLineId?: number | null;
+    materialId?: number | null;
+    materialSnapshot: string;
+    quantity: number | string;
+    unitPrice: number | string;
+    totalPrice: number | string;
+    faId?: number | null;
+    sourcingTaskId?: number | null;
+    quoteId?: number | null;
+    quoteNumber?: string | null;
+    actorRole: Role;
+    auditAction: 'create_from_fa' | 'create_from_award';
+    auditDetail: Record<string, unknown>;
+    updatePrLine?: {
+      id: number;
+      progress: string;
+      poLineNumber: number;
+    };
+    updateSourcingTask?: {
+      id: number;
+      status: string;
+    };
+  },
+): Promise<
+  | {
+      po: Record<string, unknown>;
+      poLine: Record<string, unknown>;
+      transaction_mode: 'pg';
+    }
+  | null
+> {
+  const databaseUrl = getDatabaseUrl();
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const pg = new PgClient({ connectionString: databaseUrl });
+  await pg.connect();
+
+  try {
+    await pg.query('BEGIN');
+
+    const poNumber = await numberGenerators.po();
+    const insertPO = await pg.query(
+      `INSERT INTO purchase_orders (
+        po_number, supplier_id, supplier_snapshot, delivery_date, status, created_by, pr_id, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      RETURNING *`,
+      [
+        poNumber,
+        input.supplierId,
+        input.supplierSnapshot,
+        input.deliveryDate,
+        input.status,
+        ctx.actor,
+        input.prId ?? null,
+      ],
+    );
+
+    if (!insertPO.rowCount || !insertPO.rows[0]) {
+      throw new Error('事务内创建采购订单失败');
+    }
+
+    const po = insertPO.rows[0] as Record<string, unknown>;
+    const poId = Number(po.id);
+    if (!Number.isInteger(poId) || poId <= 0) {
+      throw new Error('事务内创建采购订单后未返回有效 ID');
+    }
+
+    const insertPOLine = await pg.query(
+      `INSERT INTO purchase_order_lines (
+        order_id, line_number, pr_id, pr_line_id, material_id, material_snapshot,
+        quantity, unit_price, total_price, received_qty, pending_qty, status, fa_id, sourcing_task_id, created_at
+      ) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, 0, $9, 'ordered', $10, $11, NOW())
+      RETURNING *`,
+      [
+        poId,
+        input.prId ?? null,
+        input.prLineId ?? null,
+        input.materialId ?? null,
+        input.materialSnapshot,
+        input.quantity,
+        input.unitPrice,
+        input.totalPrice,
+        input.quantity,
+        input.faId ?? null,
+        input.sourcingTaskId ?? null,
+      ],
+    );
+
+    if (!insertPOLine.rowCount || !insertPOLine.rows[0]) {
+      throw new Error('事务内创建采购订单行失败');
+    }
+
+    const poLine = insertPOLine.rows[0] as Record<string, unknown>;
+
+    if (input.updatePrLine) {
+      await pg.query(
+        `UPDATE purchase_request_lines
+         SET progress = $1, purchase_order_id = $2, po_line_number = $3, updated_at = NOW()
+         WHERE id = $4`,
+        [
+          input.updatePrLine.progress,
+          poId,
+          input.updatePrLine.poLineNumber,
+          input.updatePrLine.id,
+        ],
+      );
+    }
+
+    if (input.updateSourcingTask) {
+      await pg.query(
+        `UPDATE sourcing_tasks
+         SET status = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [input.updateSourcingTask.status, input.updateSourcingTask.id],
+      );
+    }
+
+    await pg.query(
+      `INSERT INTO audit_logs (
+        entity_type, entity_id, action, actor, actor_role, detail, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+      [
+        'purchase_order',
+        poId,
+        input.auditAction,
+        ctx.actor,
+        input.actorRole,
+        JSON.stringify({
+          po_number: poNumber,
+          transaction_mode: 'pg',
+          created_by_agent_action: true,
+          ...input.auditDetail,
+        }),
+      ],
+    );
+
+    if (input.quoteId) {
+      await pg.query(
+        `INSERT INTO audit_logs (
+          entity_type, entity_id, action, actor, actor_role, detail, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+        [
+          'quote',
+          input.quoteId,
+          'award',
+          ctx.actor,
+          input.actorRole,
+          JSON.stringify({
+            quote_number: input.quoteNumber,
+            po_number: poNumber,
+            created_by_agent_action: true,
+            transaction_mode: 'pg',
+          }),
+        ],
+      );
+    }
+
+    await pg.query('COMMIT');
+
+    return {
+      po: {
+        ...po,
+        po_number: poNumber,
+      },
+      poLine,
+      transaction_mode: 'pg',
+    };
+  } catch (error) {
+    await pg.query('ROLLBACK');
+    throw error;
+  } finally {
+    await pg.end();
+  }
+}
+
 async function submitPurchaseRequest(ctx: ActionContext, prId: number) {
   if (ctx.role === 'manager') {
     throw new Error('Manager 不能提交采购申请');
@@ -1456,6 +1641,43 @@ export async function createPOFromAwardedQuote(
     deliveryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   }
 
+  const transactionalPO = await tryCreatePOInTransaction(ctx, {
+    supplierId: Number(quote.supplier_id),
+    supplierSnapshot: quote.supplier_snapshot,
+    deliveryDate,
+    status: 'sent',
+    prId: sourcingTask.pr_id,
+    prLineId: sourcingTask.pr_line_id,
+    materialId: quote.material_id || sourcingTask.material_id,
+    materialSnapshot: quote.material_snapshot || sourcingTask.material_snapshot,
+    quantity: Number(quote.quantity),
+    unitPrice: Number(quote.unit_price),
+    totalPrice: Number(quote.total_price),
+    sourcingTaskId: sourcingTask.id,
+    updatePrLine: sourcingTask.pr_line_id
+      ? {
+          id: sourcingTask.pr_line_id,
+          progress: 'ordered',
+          poLineNumber: 1,
+        }
+      : undefined,
+    updateSourcingTask: {
+      id: sourcingTask.id,
+      status: 'completed',
+    },
+    auditAction: 'create_from_award',
+    auditDetail: {
+      quote_id: input.quoteId,
+      quote_number: quote.quote_number,
+      sourcing_task_id: sourcingTask.id,
+      sourcing_task_number: sourcingTask.task_number,
+      created_by_agent_action: true,
+    },
+    quoteId: input.quoteId,
+    quoteNumber: quote.quote_number,
+    actorRole: ctx.role,
+  });
+
   await ctx.client
     .from('quotes')
     .update({
@@ -1470,46 +1692,68 @@ export async function createPOFromAwardedQuote(
     .eq('sourcing_task_id', sourcingTask.id)
     .neq('id', input.quoteId);
 
-  const poNumber = await numberGenerators.po();
-  const { data: po, error: poError } = await ctx.client
-    .from('purchase_orders')
-    .insert({
-      po_number: poNumber,
-      supplier_id: quote.supplier_id,
-      supplier_snapshot: quote.supplier_snapshot,
-      delivery_date: deliveryDate,
-      status: 'sent',
-      created_by: ctx.actor,
-      pr_id: sourcingTask.pr_id,
-    })
-    .select()
-    .single();
+  let po = transactionalPO?.po;
+  let poNumber = transactionalPO?.po?.po_number as string | undefined;
 
-  if (poError || !po) {
-    throw new Error(poError?.message || '创建采购订单失败');
-  }
+  if (!transactionalPO) {
+    const fallbackPoNumber = await numberGenerators.po();
+    const { data: createdPo, error: poError } = await ctx.client
+      .from('purchase_orders')
+      .insert({
+        po_number: fallbackPoNumber,
+        supplier_id: quote.supplier_id,
+        supplier_snapshot: quote.supplier_snapshot,
+        delivery_date: deliveryDate,
+        status: 'sent',
+        created_by: ctx.actor,
+        pr_id: sourcingTask.pr_id,
+      })
+      .select()
+      .single();
 
-  const { error: poLineError } = await ctx.client
-    .from('purchase_order_lines')
-    .insert({
-      order_id: po.id,
-      line_number: 1,
-      pr_id: sourcingTask.pr_id,
-      pr_line_id: sourcingTask.pr_line_id,
-      material_id: quote.material_id || sourcingTask.material_id,
-      material_snapshot: quote.material_snapshot || sourcingTask.material_snapshot,
-      quantity: quote.quantity,
-      unit_price: quote.unit_price,
-      total_price: quote.total_price,
-      received_qty: 0,
-      pending_qty: quote.quantity,
-      status: 'ordered',
-      sourcing_task_id: sourcingTask.id,
-    });
+    if (poError || !createdPo) {
+      throw new Error(poError?.message || '创建采购订单失败');
+    }
 
-  if (poLineError) {
-    await ctx.client.from('purchase_orders').delete().eq('id', po.id);
-    throw new Error(poLineError.message);
+    const { error: poLineError } = await ctx.client
+      .from('purchase_order_lines')
+      .insert({
+        order_id: createdPo.id,
+        line_number: 1,
+        pr_id: sourcingTask.pr_id,
+        pr_line_id: sourcingTask.pr_line_id,
+        material_id: quote.material_id || sourcingTask.material_id,
+        material_snapshot: quote.material_snapshot || sourcingTask.material_snapshot,
+        quantity: quote.quantity,
+        unit_price: quote.unit_price,
+        total_price: quote.total_price,
+        received_qty: 0,
+        pending_qty: quote.quantity,
+        status: 'ordered',
+        sourcing_task_id: sourcingTask.id,
+      });
+
+    if (poLineError) {
+      await ctx.client.from('purchase_orders').delete().eq('id', createdPo.id);
+      throw new Error(poLineError.message);
+    }
+
+    const poVerify = await verifySingleRowExists(ctx.client, 'purchase_orders', createdPo.id);
+    const poLinesVerify = await verifyRowsByField(
+      ctx.client,
+      'purchase_order_lines',
+      'order_id',
+      createdPo.id,
+      1,
+    );
+    if (!poVerify.ok || !poLinesVerify.ok) {
+      await ctx.client.from('purchase_order_lines').delete().eq('order_id', createdPo.id);
+      await ctx.client.from('purchase_orders').delete().eq('id', createdPo.id);
+      throw new Error(!poVerify.ok ? poVerify.reason : (poLinesVerify as { ok: false; reason: string }).reason);
+    }
+
+    po = createdPo;
+    poNumber = fallbackPoNumber;
   }
 
   await ctx.client
@@ -1520,7 +1764,7 @@ export async function createPOFromAwardedQuote(
     })
     .eq('id', sourcingTask.id);
 
-  if (sourcingTask.pr_line_id) {
+  if (sourcingTask.pr_line_id && po) {
     await ctx.client
       .from('purchase_request_lines')
       .update({
@@ -1532,37 +1776,22 @@ export async function createPOFromAwardedQuote(
       .eq('id', sourcingTask.pr_line_id);
   }
 
-  await ctx.client.from('audit_logs').insert([
-    {
-      entity_type: 'quote',
-      entity_id: input.quoteId,
-      action: 'award',
-      actor: ctx.actor,
-      actor_role: ctx.role,
-      detail: {
-        quote_number: quote.quote_number,
-        po_number: poNumber,
-        quote_unit_price: quote.unit_price,
-        quote_quantity: quote.quantity,
-        created_by_agent_action: true,
-      },
+  await ctx.client.from('audit_logs').insert({
+    entity_type: 'quote',
+    entity_id: input.quoteId,
+    action: 'award',
+    actor: ctx.actor,
+    actor_role: ctx.role,
+    detail: {
+      quote_number: quote.quote_number,
+      po_number: poNumber,
+      quote_unit_price: quote.unit_price,
+      quote_quantity: quote.quantity,
+      created_by_agent_action: true,
     },
-    {
-      entity_type: 'purchase_order',
-      entity_id: po.id,
-      action: 'create_from_award',
-      actor: ctx.actor,
-      actor_role: ctx.role,
-      detail: {
-        po_number: poNumber,
-        quote_id: input.quoteId,
-        quote_number: quote.quote_number,
-        sourcing_task_id: sourcingTask.id,
-        sourcing_task_number: sourcingTask.task_number,
-        created_by_agent_action: true,
-      },
-    },
-  ]);
+  });
+
+  const poId = Number(po!.id);
 
   emitQuoteAwarded(
     {
@@ -1579,8 +1808,8 @@ export async function createPOFromAwardedQuote(
       unitPrice: quote.unit_price,
       totalPrice: quote.total_price,
       autoPO: {
-        poId: po.id,
-        poNumber,
+        poId,
+        poNumber: poNumber!,
         status: 'sent',
       },
       actor: ctx.actor,
@@ -1591,8 +1820,8 @@ export async function createPOFromAwardedQuote(
 
   emitPOCreated(
     {
-      poId: po.id,
-      poNumber,
+      poId,
+      poNumber: poNumber!,
       supplierId: quote.supplier_id,
       supplierName: quote.supplier_snapshot || '未知供应商',
       prId: sourcingTask.pr_id,
@@ -1614,8 +1843,8 @@ export async function createPOFromAwardedQuote(
       awarded: 'awarded',
     },
     purchaseOrder: {
-      id: po.id,
-      po_number: poNumber,
+      id: po!.id,
+      po_number: poNumber!,
       status: 'sent',
       supplier_name: quote.supplier_snapshot,
       delivery_date: deliveryDate,

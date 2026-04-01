@@ -389,6 +389,11 @@ GET /api/agent-actions/manifest
 
 同一 `actor + action + idempotencyKey` 重复调用时，系统会直接返回上次成功结果，避免因 Agent 重试导致重复建单、重复提交或重复收货。
 
+当部署环境提供 `DATABASE_URL` 时，以下关键动作优先使用真实 PostgreSQL 事务：
+- `create-pr-from-material-check`
+- `confirm-fa-and-create-po`
+- `create-po-from-awarded-quote`
+
 ### 事务与一致性说明
 
 - 创建 PR（header + items）会优先尝试使用 `DATABASE_URL` 走真实数据库事务
