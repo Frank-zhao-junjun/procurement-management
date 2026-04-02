@@ -27,6 +27,8 @@ cp .env.example .env.local
 # 编辑 .env.local 填入你的 Supabase 配置
 ```
 
+**可选：`DATABASE_URL`** — 与 Supabase 指向**同一 PostgreSQL** 实例的连接串。配置后，部分多表写入（PR/审批/PO/收货等）会走 `src/lib/transactional-db.ts` 的 **PostgreSQL 事务**；未配置时仍使用 Supabase JS 客户端的非事务路径，行为与旧版兼容。详见下文「服务端多步事务」。
+
 ### 3. 启动开发服务器
 
 ```bash
@@ -227,8 +229,10 @@ src/
 │   └── ui/                   # shadcn/ui 组件
 ├── lib/
 │   ├── api.ts                # API 客户端（含搜索参数）
+│   ├── transactional-db.ts   # 可选：直连 PG 事务（需 DATABASE_URL）
 │   ├── webhook.ts            # Webhook 通知模块
 │   ├── agent-notify.ts       # 业务事件通知
+│   ├── agent-actions.ts      # Agent 高层操作与事务化路径
 │   └── role-filter.ts        # 角色权限过滤
 └── storage/
     └── database/
@@ -238,6 +242,27 @@ src/
         ├── fa-matcher.ts         # FA 智能匹配
         └── po-sender.ts          # PO 发送与重试
 ```
+
+## 服务端多步事务（可选）
+
+关键流程在实现上支持 **直连数据库事务**（`pg` + `BEGIN`/`COMMIT`/`ROLLBACK`），入口为 `withPgTransaction`（见 `src/lib/transactional-db.ts`）。
+
+| 条件 | 行为 |
+|------|------|
+| 已设置 **`DATABASE_URL`** | Agent 相关多步操作（如 PR 创建、审批、PO 创建、收货）在可用时以 **单事务** 提交，失败则回滚。 |
+| 未设置 **`DATABASE_URL`** | 上述流程自动退化为 **Supabase 客户端** 多次请求，功能可用；极端并发下一致性弱于事务模式。 |
+
+**生产环境建议**：若托管平台提供 Postgres 连接串（如 Supabase「Database settings → Connection string」），将同一实例的 URL 配为 `DATABASE_URL`，并按云厂商要求附加 SSL（如 `?sslmode=require`）。
+
+## 部署与冒烟检查
+
+上线或合并大版本后建议快速验证：
+
+1. **依赖与类型**：`pnpm install`，`pnpm exec tsc -p tsconfig.json`（或 `pnpm ts-check`）。
+2. **环境**：`COZE_SUPABASE_URL`、`COZE_SUPABASE_ANON_KEY` 必填；需要强一致多表写入时再配 **`DATABASE_URL`**。
+3. **业务冒烟**：Agent 注册 → 带 `X-Actor` 创建/提交 PR →（可选）Webhook 收到事件 → 创建 PO / 收货路径能走通。
+
+Windows 下若 `pnpm build` 依赖 Bash，可使用 Git Bash/WSL，或直接用 `pnpm exec next build` 做构建验证（与 `scripts/build.sh` 行为以脚本为准）。
 
 ## 数据库
 
