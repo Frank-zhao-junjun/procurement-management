@@ -54,9 +54,9 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
-    // 仅 buyer 和 manager 可创建物料
-    if (role !== 'buyer' && role !== 'manager') {
-      return NextResponse.json({ error: '只有 Buyer 或 Manager 可以创建物料' }, { status: 403 });
+    // 所有角色都可以创建物料（需求人提交采购申请时可能需要新建物料）
+    if (role !== 'buyer' && role !== 'manager' && role !== 'requester') {
+      return NextResponse.json({ error: '无权限创建物料' }, { status: 403 });
     }
 
     // 验证输入

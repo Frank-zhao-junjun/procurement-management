@@ -189,8 +189,8 @@ curl -X POST http://localhost:5000/api/purchase-requests \
 
 | 角色 | 可创建 | 可查看 | 可审批 |
 |------|--------|--------|--------|
-| `requester` | PR | 自己PR对应数据 | - |
-| `buyer` | PO, Quote, SC, FA | 所有采购数据 | - |
+| `requester` | PR, Material | 自己PR对应数据 | - |
+| `buyer` | PO, Quote, SC, FA, Material | 所有采购数据 | - |
 | `manager` | - | 所有数据 | PR, 超收收货 |
 
 ## 完整业务流程
@@ -501,7 +501,7 @@ GET /api/agent-bindings?role=manager
 |------|----------|
 | `GET /api/goods-receipts/pending-approval` | Manager only |
 | `GET /api/audit-logs` | Manager 看全部，其他人看自己 |
-| `POST /api/materials` | Buyer/Manager |
+| `POST /api/materials` | 所有角色 |
 | `POST /api/suppliers` | Buyer/Manager |
 | `GET /api/purchase-orders/{id}` | Requester 只能看自己PR对应的PO |
 
