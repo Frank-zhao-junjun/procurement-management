@@ -533,6 +533,8 @@ pnpm start:mcp
 # http://localhost:5001/mcp
 ```
 
+生产/联调请在请求头携带 **`Authorization: Bearer <token>`**（Token 由 `MCP_API_KEY_SECRET` 与已注册的 `agent_id` 生成，见 `pnpm mcp:token <agent_id>` 与 [MCP_INTEGRATION.md](./MCP_INTEGRATION.md)）。未配置 `MCP_API_KEY_SECRET` 时仅开发环境可使用占位身份。同域部署推荐 Nginx 将 `https://你的域名/mcp` 反代到本服务并**透传 `Authorization`**。
+
 ### MCP 工具列表
 
 | 工具名称 | 说明 |

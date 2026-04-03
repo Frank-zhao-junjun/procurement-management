@@ -4,9 +4,18 @@
  */
 
 import { loadEnv } from '@/storage/database/supabase-client';
+import { getMcpIdentity } from '../context';
 
 // 加载环境变量
 loadEnv();
+
+/** 与当前 MCP 会话身份绑定，与 REST API X-Actor / X-Role 一致 */
+function actorHeaders(overrides?: { actor?: string }): Record<string, string> {
+  const id = getMcpIdentity();
+  const actor = overrides?.actor ?? id?.agentId ?? 'mcp-system';
+  const role = id?.role ?? 'buyer';
+  return { 'X-Actor': actor, 'X-Role': role };
+}
 
 const SUPABASE_URL = process.env.COZE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.COZE_SUPABASE_ANON_KEY || '';
@@ -37,9 +46,8 @@ async function callAPI(path: string, options: any): Promise<any> {
   const response = await fetch(url, {
     ...options,
     headers: {
+      ...actorHeaders(),
       ...options.headers,
-      'X-Actor': options.headers?.['X-Actor'] || 'mcp-system',
-      'X-Role': options.headers?.['X-Role'] || 'buyer',
     },
   });
   
@@ -132,6 +140,7 @@ export async function matchMaterial(text: string) {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -146,6 +155,7 @@ export async function searchMaterials(query: string) {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -168,8 +178,7 @@ export async function createPurchaseRequest(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       reason: params.reason,
@@ -197,8 +206,7 @@ export async function listPurchaseRequests(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -213,8 +221,7 @@ export async function submitPurchaseRequest(prId: number) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -229,8 +236,7 @@ export async function approvePRLine(lineId: number, approved: boolean, reason?: 
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'manager',
+      ...actorHeaders(),
     },
     body: JSON.stringify({ approved, reason }),
   });
@@ -252,8 +258,7 @@ export async function createSourcingTask(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       prId: params.prId,
@@ -281,8 +286,7 @@ export async function listSourcingTasks(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -304,8 +308,7 @@ export async function createQuote(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       sourcingTaskId: params.sourcingTaskId,
@@ -327,8 +330,7 @@ export async function awardQuote(quoteId: number) {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
     body: JSON.stringify({ awarded: 'winner' }),
   });
@@ -354,8 +356,7 @@ export async function createPurchaseOrder(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       supplierId: params.supplierId,
@@ -375,8 +376,7 @@ export async function sendPurchaseOrder(poId: number) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -397,8 +397,7 @@ export async function createGoodsReceipt(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       poLineId: params.poLineId,
@@ -425,8 +424,7 @@ export async function createMaterial(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       code: params.code,
@@ -454,6 +452,7 @@ export async function listMaterials(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -478,8 +477,7 @@ export async function createSupplier(params: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': params.actor || 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders({ actor: params.actor }),
     },
     body: JSON.stringify({
       code: params.code,
@@ -511,6 +509,7 @@ export async function listSuppliers(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -532,8 +531,7 @@ export async function listPurchaseOrders(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -553,8 +551,7 @@ export async function listGoodsReceipts(params?: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
-      'X-Actor': 'mcp-system',
-      'X-Role': 'buyer',
+      ...actorHeaders(),
     },
   });
   return response.json();
@@ -578,6 +575,7 @@ export async function matchFrameworkAgreement(params: {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
+      ...actorHeaders(),
     },
   });
   return response.json();

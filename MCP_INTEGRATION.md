@@ -29,127 +29,86 @@
 
 ## 检查清单
 
-### 1. MCP 鉴权加固
+### 1. MCP 鉴权（已实现）
 
 | 检查项 | 状态 | 说明 |
 |--------|------|------|
-| Agent 身份验证 | ❌ 待实现 | 需要验证调用者是否为已注册的 Agent |
-| API Key 认证 | ❌ 待实现 | 可选：基于 Bearer Token 的认证 |
-| 请求频率限制 | ❌ 待实现 | 防止滥用 |
-| 操作审计日志 | ❌ 待实现 | 记录所有 MCP 调用 |
+| Agent 身份验证 | ✅ | Bearer Token 内嵌 `agent_id`，服务端用 `MCP_API_KEY_SECRET` 校验 HMAC；**角色以 `agent_bindings` 为准**（查库），不新表 |
+| Bearer Token | ✅ | 格式 `v1.<base64url(payload)>.<hex_hmac>`，`payload = { a, exp }` |
+| 请求频率限制 | ❌ | 待实现（建议网关或后续中间件） |
+| 操作审计日志 | ✅ | `audit_logs`：`entity_type=mcp`，`action=mcp_tool_ok` / `mcp_tool_error` |
 
-#### 推荐实现方案
+**生成 Token（与 `src/mcp/auth.ts` 一致）：**
 
-```typescript
-// src/mcp/auth.ts
-
-// Agent 注册表 (可存储在数据库或内存中)
-const registeredAgents = new Map<string, { role: string; permissions: string[] }>();
-
-// 鉴权中间件
-async function authenticateAgent(req: Request): Promise<{ agentId: string; role: string } | null> {
-  const apiKey = req.headers.get('Authorization')?.replace('Bearer ', '');
-  
-  if (!apiKey) {
-    return null;
-  }
-  
-  // 从数据库验证 API Key
-  const agent = await db.query('SELECT * FROM agent_api_keys WHERE api_key = $1', [apiKey]);
-  
-  if (!agent) {
-    return null;
-  }
-  
-  return { agentId: agent.agent_id, role: agent.role };
-}
-
-// 工具权限检查
-function checkToolPermission(role: string, toolName: string): boolean {
-  const permissions = {
-    requester: ['match_material', 'list_materials', 'create_material', 'list_suppliers', 
-                 'create_purchase_request', 'list_purchase_requests', 'submit_purchase_request',
-                 'list_purchase_orders', 'list_goods_receipts'],
-    buyer: ['*'], // 所有工具
-    manager: ['*'], // 所有工具
-  };
-  
-  const rolePerms = permissions[role as keyof typeof permissions] || [];
-  return rolePerms.includes('*') || rolePerms.includes(toolName);
-}
+```bash
+# 需与线上相同的 MCP_API_KEY_SECRET；agent_id 须已在 agent_bindings 中注册
+pnpm mcp:token <agent_id> 86400
 ```
 
-### 2. 同域反代配置
+**环境变量：**
+
+- `MCP_API_KEY_SECRET`：签发/校验密钥。**生产环境必填**；未配置时开发环境使用占位身份 `mcp-dev`（仅本地）。
+- `COZE_SUPABASE_SERVICE_ROLE_KEY`：MCP 进程查询 `agent_bindings`、写 `audit_logs` 建议使用（与主应用一致）。
+
+实现文件：`src/mcp/auth.ts`、`src/mcp/tool-policy.ts`、`src/mcp/audit.ts`、`src/mcp/context.ts`。
+
+### 2. 同域反代（方案 B：Nginx）
 
 | 检查项 | 状态 | 说明 |
 |--------|------|------|
-| 与主服务同域部署 | ❌ 待实现 | 需要集成到 Next.js 或统一入口 |
-| Nginx 反向代理 | ❌ 待规划 | 可选方案 |
-| 统一 CORS 配置 | ❌ 待实现 | 需要处理跨域问题 |
+| 与主服务同域 | ✅ 文档级 | 浏览器/Coze 只访问 `https://purchase.coze.site`，由 Nginx 分流 |
+| Nginx 反向代理 | ✅ | 见下（**须透传 `Authorization` 与 `mcp-session-id`**） |
+| CORS | ✅ | MCP 进程已允许 `Authorization` 请求头 |
 
-#### 方案 A: 集成到 Next.js (推荐)
-
-```typescript
-// src/app/api/mcp/route.ts (App Router)
-import { NextRequest, NextResponse } from 'next/server';
-import { mcpHandler } from '@/lib/mcp-handler';
-
-export async function POST(request: NextRequest) {
-  const response = await mcpHandler(request, 'stream');
-  return new NextResponse(response.body, {
-    status: response.status,
-    headers: response.headers,
-  });
-}
-
-export async function GET(request: NextRequest) {
-  const sessionId = request.nextUrl.searchParams.get('sessionId');
-  if (!sessionId) {
-    return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
-  }
-  
-  const response = await mcpHandler(request, 'sse', sessionId);
-  return new NextResponse(response.body, {
-    status: response.status,
-    headers: response.headers,
-  });
-}
-```
-
-#### 方案 B: Nginx 反向代理
+#### Nginx 反向代理（方案 B）
 
 ```nginx
 # /etc/nginx/conf.d/purchase.coze.site.conf
 
 server {
-    listen 80;
+    listen 443 ssl;
     server_name purchase.coze.site;
 
     # 主应用
     location / {
-        proxy_pass http://localhost:5000;
+        proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
     }
 
-    # MCP Server 反代
+    # MCP：同域 https://purchase.coze.site/mcp/ → 本机 MCP 端口
     location /mcp/ {
-        proxy_pass http://localhost:5001/mcp/;
+        proxy_pass http://127.0.0.1:5001/mcp/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $http_connection;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        
-        # SSE 支持
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 鉴权与会话：必须转发客户端原始头
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header mcp-session-id $http_mcp_session_id;
+
         proxy_cache off;
         proxy_buffering off;
+        proxy_read_timeout 3600s;
     }
 }
 ```
+
+**Coze 侧填写的 MCP 地址示例：** `https://purchase.coze.site/mcp`（以实际 TLS 与路径为准）。
+
+#### 方案 A: 集成到 Next.js（可选，后续）
+
+仍可将 Streamable HTTP 挂到 `/api/mcp`；当前以 **独立进程 + Nginx 反代** 为默认，运维简单、与现有 `start-all.sh` 一致。
 
 ### 3. 环境变量配置
 
@@ -255,9 +214,9 @@ curl -X POST http://localhost:5001/mcp \
 ## 待办事项
 
 ### 高优先级
-- [ ] MCP Server 集成到 Next.js 统一入口 (避免跨域问题)
-- [ ] 实现 Agent 鉴权机制
-- [ ] 添加 MCP 调用审计日志
+- [ ] MCP Server 集成到 Next.js 统一入口 (可选；当前以 Nginx 同域反代为主)
+- [x] Agent 鉴权机制（Bearer + agent_bindings，见上文）
+- [x] MCP 调用审计日志（audit_logs / entity_type=mcp）
 
 ### 中优先级
 - [ ] 实现请求频率限制

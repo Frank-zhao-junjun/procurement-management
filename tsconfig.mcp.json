@@ -14,7 +14,11 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "baseUrl": "."
   },
   "include": ["src/mcp/**/*"],
   "exclude": ["node_modules", "dist", "src/app", "src/pages"]

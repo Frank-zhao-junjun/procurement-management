@@ -12,6 +12,7 @@
     "start": "bash ./scripts/start.sh",
     "start:mcp": "npx tsx src/mcp/server.ts",
     "start:all": "bash ./scripts/start-all.sh",
+    "mcp:token": "tsx scripts/generate-mcp-token.ts",
     "ts-check": "tsc -p tsconfig.json"
   },
   "dependencies": {

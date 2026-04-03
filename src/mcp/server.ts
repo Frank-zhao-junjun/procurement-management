@@ -11,8 +11,21 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
+import { loadEnv } from '@/storage/database/supabase-client';
+import { runWithMcpIdentity, getMcpIdentity } from './context';
+import {
+  verifyMcpBearer,
+  isMcpAuthConfigured,
+  MCP_DEV_FALLBACK,
+  type McpAuthContext,
+} from './auth';
+import { canInvokeTool } from './tool-policy';
+import { logMcpToolCall } from './audit';
+
 // 导入工具实现
 import * as procurementTools from './tools/procurement';
+
+loadEnv();
 
 // MCP Server 配置
 const MCP_PORT = parseInt(process.env.MCP_SERVER_PORT || '5001', 10);
@@ -24,10 +37,56 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+function registerProcurementTool(
+  name: string,
+  config: { description: string; inputSchema: z.ZodType },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>,
+) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  server.registerTool(name, config, async (args: any) => {
+    const id = getMcpIdentity();
+    if (!id) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: 'mcp_identity_missing' }) }],
+      };
+    }
+    const ctx: McpAuthContext = {
+      agentId: id.agentId,
+      role: id.role,
+      bindingId: id.bindingId,
+    };
+    if (!canInvokeTool(ctx.role, name)) {
+      await logMcpToolCall({
+        ctx,
+        toolName: name,
+        ok: false,
+        detail: { reason: 'forbidden' },
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: 'forbidden', tool: name }) }],
+      };
+    }
+    try {
+      const out = await handler(args);
+      await logMcpToolCall({ ctx, toolName: name, ok: true, detail: {} });
+      return out;
+    } catch (e) {
+      await logMcpToolCall({
+        ctx,
+        toolName: name,
+        ok: false,
+        detail: { message: (e as Error).message },
+      });
+      throw e;
+    }
+  });
+}
+
 // ============ 注册工具 ============
 
 // 物料工具
-server.registerTool('match_material', {
+registerProcurementTool('match_material', {
   description: '检查物料是否已存在，返回匹配结果和建议操作',
   inputSchema: z.object({
     text: z.string().describe('物料名称或描述'),
@@ -37,7 +96,7 @@ server.registerTool('match_material', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('list_materials', {
+registerProcurementTool('list_materials', {
   description: '查询物料列表',
   inputSchema: z.object({
     search: z.string().optional().describe('搜索关键词'),
@@ -48,7 +107,7 @@ server.registerTool('list_materials', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('create_material', {
+registerProcurementTool('create_material', {
   description: '创建新物料',
   inputSchema: z.object({
     code: z.string().describe('物料编码'),
@@ -63,7 +122,7 @@ server.registerTool('create_material', {
 });
 
 // 供应商工具
-server.registerTool('list_suppliers', {
+registerProcurementTool('list_suppliers', {
   description: '查询供应商列表',
   inputSchema: z.object({
     search: z.string().optional().describe('搜索关键词'),
@@ -74,7 +133,7 @@ server.registerTool('list_suppliers', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('create_supplier', {
+registerProcurementTool('create_supplier', {
   description: '创建新供应商',
   inputSchema: z.object({
     code: z.string().describe('供应商编码'),
@@ -93,7 +152,7 @@ server.registerTool('create_supplier', {
 });
 
 // 采购申请工具
-server.registerTool('create_purchase_request', {
+registerProcurementTool('create_purchase_request', {
   description: '创建采购申请',
   inputSchema: z.object({
     reason: z.string().describe('采购原因'),
@@ -109,7 +168,7 @@ server.registerTool('create_purchase_request', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('list_purchase_requests', {
+registerProcurementTool('list_purchase_requests', {
   description: '查询采购申请列表',
   inputSchema: z.object({
     status: z.string().optional().describe('状态筛选'),
@@ -121,7 +180,7 @@ server.registerTool('list_purchase_requests', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('submit_purchase_request', {
+registerProcurementTool('submit_purchase_request', {
   description: '提交采购申请',
   inputSchema: z.object({
     prId: z.number().describe('采购申请ID'),
@@ -132,7 +191,7 @@ server.registerTool('submit_purchase_request', {
 });
 
 // 寻源任务工具
-server.registerTool('create_sourcing_task', {
+registerProcurementTool('create_sourcing_task', {
   description: '创建寻源任务',
   inputSchema: z.object({
     prId: z.number().describe('采购申请ID'),
@@ -146,7 +205,7 @@ server.registerTool('create_sourcing_task', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('list_sourcing_tasks', {
+registerProcurementTool('list_sourcing_tasks', {
   description: '查询寻源任务列表',
   inputSchema: z.object({
     status: z.string().optional().describe('状态筛选'),
@@ -158,7 +217,7 @@ server.registerTool('list_sourcing_tasks', {
 });
 
 // 报价单工具
-server.registerTool('create_quote', {
+registerProcurementTool('create_quote', {
   description: '创建报价单',
   inputSchema: z.object({
     sourcingTaskId: z.number().optional().describe('寻源任务ID'),
@@ -173,7 +232,7 @@ server.registerTool('create_quote', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('award_quote', {
+registerProcurementTool('award_quote', {
   description: '授标报价单',
   inputSchema: z.object({
     quoteId: z.number().describe('报价单ID'),
@@ -184,7 +243,7 @@ server.registerTool('award_quote', {
 });
 
 // 采购订单工具
-server.registerTool('create_purchase_order', {
+registerProcurementTool('create_purchase_order', {
   description: '创建采购订单',
   inputSchema: z.object({
     supplierId: z.number().describe('供应商ID'),
@@ -202,7 +261,7 @@ server.registerTool('create_purchase_order', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('send_purchase_order', {
+registerProcurementTool('send_purchase_order', {
   description: '发送采购订单',
   inputSchema: z.object({
     poId: z.number().describe('采购订单ID'),
@@ -212,7 +271,7 @@ server.registerTool('send_purchase_order', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('list_purchase_orders', {
+registerProcurementTool('list_purchase_orders', {
   description: '查询采购订单列表',
   inputSchema: z.object({
     status: z.string().optional().describe('状态筛选'),
@@ -224,7 +283,7 @@ server.registerTool('list_purchase_orders', {
 });
 
 // 收货工具
-server.registerTool('create_goods_receipt', {
+registerProcurementTool('create_goods_receipt', {
   description: '创建收货单',
   inputSchema: z.object({
     poLineId: z.number().describe('订单行ID'),
@@ -238,7 +297,7 @@ server.registerTool('create_goods_receipt', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.registerTool('list_goods_receipts', {
+registerProcurementTool('list_goods_receipts', {
   description: '查询收货单列表',
   inputSchema: z.object({
     poId: z.number().optional().describe('订单ID'),
@@ -249,7 +308,7 @@ server.registerTool('list_goods_receipts', {
 });
 
 // 框架协议工具
-server.registerTool('match_framework_agreement', {
+registerProcurementTool('match_framework_agreement', {
   description: '查询框架协议匹配',
   inputSchema: z.object({
     materialId: z.number().optional().describe('物料ID'),
@@ -263,16 +322,32 @@ server.registerTool('match_framework_agreement', {
 
 // ============ HTTP Server ============
 
-// 存储活跃的 transports 和已连接的 transports
 const transports: Record<string, StreamableHTTPServerTransport> = {};
 const connectedTransports = new Set<string>();
+const sessionContexts: Record<string, McpAuthContext> = {};
 
-// 创建 HTTP Server
-const httpServer = http.createServer(async (req, res) => {
-  // CORS 头
+async function resolveSessionContext(req: http.IncomingMessage): Promise<McpAuthContext> {
+  const sid = req.headers['mcp-session-id'] as string | undefined;
+  if (sid && sessionContexts[sid]) {
+    return sessionContexts[sid];
+  }
+  if (!isMcpAuthConfigured()) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('MCP_API_KEY_SECRET is required in production');
+    }
+    console.warn('[MCP] MCP_API_KEY_SECRET not set; using dev fallback identity');
+    return MCP_DEV_FALLBACK;
+  }
+  return verifyMcpBearer(req.headers.authorization);
+}
+
+const httpServer = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcpsessionid, mcp-session-id');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, mcpsessionid, mcp-session-id',
+  );
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -280,86 +355,118 @@ const httpServer = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST 请求处理
   if (req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
     req.on('end', async () => {
       try {
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+        const sessionIdHeader = req.headers['mcp-session-id'] as string | undefined;
+        let ctx: McpAuthContext;
+
+        if (sessionIdHeader && transports[sessionIdHeader]) {
+          if (!sessionContexts[sessionIdHeader]) {
+            res.writeHead(401, { 'Content-Type': 'text/plain' });
+            res.end('Unauthorized');
+            return;
+          }
+          ctx = sessionContexts[sessionIdHeader];
+        } else {
+          ctx = await resolveSessionContext(req);
+        }
+
         let transport: StreamableHTTPServerTransport;
 
-        if (sessionId && transports[sessionId]) {
-          // 已有会话
-          transport = transports[sessionId];
+        if (sessionIdHeader && transports[sessionIdHeader]) {
+          transport = transports[sessionIdHeader];
         } else {
-          // 创建新会话
           transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
           });
           transports[transport.sessionId!] = transport;
-          
-          // 清理关闭的 transport
+          sessionContexts[transport.sessionId!] = ctx;
           transport.onclose = () => {
-            delete transports[transport.sessionId!];
-            connectedTransports.delete(transport.sessionId!);
+            const id = transport.sessionId!;
+            delete transports[id];
+            delete sessionContexts[id];
+            connectedTransports.delete(id);
           };
         }
 
-        // 只在第一次连接时连接服务器
         if (!connectedTransports.has(transport.sessionId!)) {
           await server.connect(transport);
           connectedTransports.add(transport.sessionId!);
         }
 
-        await transport.handleRequest(req, res, body ? JSON.parse(body) : undefined);
+        await runWithMcpIdentity(ctx, async () => {
+          await transport.handleRequest(req, res, body ? JSON.parse(body) : undefined);
+        });
       } catch (error) {
+        const msg = (error as Error).message;
+        const unauthorized =
+          msg.includes('Missing') ||
+          msg.includes('Invalid') ||
+          msg.includes('not registered') ||
+          msg.includes('Inactive') ||
+          msg.includes('inactive') ||
+          msg.includes('expired') ||
+          msg.includes('Unauthorized');
+        const code = unauthorized ? 401 : 500;
         console.error('Error handling MCP request:', error);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: (error as Error).message }));
+        if (!res.headersSent) {
+          res.writeHead(code, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: msg }));
+        }
       }
     });
     return;
   }
 
-  // GET 请求处理 (SSE)
   if (req.method === 'GET') {
     const sessionId = req.headers['mcp-session-id'] as string;
-    
-    if (!sessionId || !transports[sessionId]) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('Invalid or missing session ID');
+    if (!sessionId || !transports[sessionId] || !sessionContexts[sessionId]) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('Unauthorized');
       return;
     }
-
-    try {
-      await transports[sessionId].handleRequest(req, res);
-    } catch (error) {
-      console.error('Error handling GET request:', error);
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end((error as Error).message);
-    }
+    const ctx = sessionContexts[sessionId];
+    void runWithMcpIdentity(ctx, async () => {
+      try {
+        await transports[sessionId].handleRequest(req, res);
+      } catch (error) {
+        console.error('Error handling GET request:', error);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end((error as Error).message);
+        }
+      }
+    });
     return;
   }
 
-  // DELETE 请求处理
   if (req.method === 'DELETE') {
     const sessionId = req.headers['mcp-session-id'] as string;
-    
-    if (!sessionId || !transports[sessionId]) {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('Invalid or missing session ID');
+    if (!sessionId || !transports[sessionId] || !sessionContexts[sessionId]) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('Unauthorized');
       return;
     }
-
-    try {
-      await transports[sessionId].handleRequest(req, res);
-      delete transports[sessionId];
-    } catch (error) {
-      console.error('Error handling DELETE request:', error);
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end((error as Error).message);
-    }
+    const ctx = sessionContexts[sessionId];
+    void runWithMcpIdentity(ctx, async () => {
+      try {
+        await transports[sessionId].handleRequest(req, res);
+        delete transports[sessionId];
+        delete sessionContexts[sessionId];
+        connectedTransports.delete(sessionId);
+      } catch (error) {
+        console.error('Error handling DELETE request:', error);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end((error as Error).message);
+        }
+      }
+    });
     return;
   }
 
