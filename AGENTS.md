@@ -518,3 +518,62 @@ GET /api/agent-bindings?role=manager
 - `无效的供应商 ID: ${id}，该供应商不存在` - 供应商 ID 不存在于 suppliers 表
 - `只能向草稿状态的订单添加行` - PO 已发送或完成，无法修改
 - `只有 Buyer 或 Manager 可以添加订单行` - 权限不足 |
+
+## MCP Server (Model Context Protocol)
+
+系统提供 MCP Server，供 Agent 通过 MCP 协议调用采购管理功能。
+
+### 启动 MCP Server
+
+```bash
+# 启动 MCP Server (端口 5001)
+pnpm start:mcp
+
+# MCP Server 地址
+# http://localhost:5001/mcp
+```
+
+### MCP 工具列表
+
+| 工具名称 | 说明 |
+|----------|------|
+| `match_material` | 检查物料是否已存在 |
+| `list_materials` | 查询物料列表 |
+| `create_material` | 创建新物料 |
+| `list_suppliers` | 查询供应商列表 |
+| `create_supplier` | 创建新供应商 |
+| `create_purchase_request` | 创建采购申请 |
+| `list_purchase_requests` | 查询采购申请列表 |
+| `submit_purchase_request` | 提交采购申请 |
+| `create_sourcing_task` | 创建寻源任务 |
+| `list_sourcing_tasks` | 查询寻源任务列表 |
+| `create_quote` | 创建报价单 |
+| `award_quote` | 授标报价单 |
+| `create_purchase_order` | 创建采购订单 |
+| `send_purchase_order` | 发送采购订单 |
+| `list_purchase_orders` | 查询采购订单列表 |
+| `create_goods_receipt` | 创建收货单 |
+| `list_goods_receipts` | 查询收货单列表 |
+| `match_framework_agreement` | 查询框架协议匹配 |
+
+### MCP 协议示例
+
+```bash
+# 1. 初始化连接
+curl -X POST http://localhost:5001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"agent","version":"1.0"}}}'
+
+# 2. 发送 initialized 通知
+curl -X POST http://localhost:5001/mcp \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: <SESSION_ID>" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+
+# 3. 调用工具 (match_material 示例)
+curl -X POST http://localhost:5001/mcp \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: <SESSION_ID>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"match_material","arguments":{"text":"无线鼠标"}}}'
+```
