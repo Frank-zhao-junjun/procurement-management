@@ -293,6 +293,84 @@ export async function listSourcingTasks(params?: {
 }
 
 /**
+ * 获取待寻源的采购申请行
+ * 返回 FA 匹配失败或需要寻源的 PR 行
+ */
+export async function getPendingSourcing(params?: {
+  page?: number;
+  pageSize?: number;
+}) {
+  const baseURL = process.env.MCP_API_BASE || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  
+  const response = await fetch(`${baseURL}/api/sourcing-tasks/pending?${searchParams}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Actor': 'mcp-system',
+      'X-Role': 'buyer',
+    },
+  });
+  return response.json();
+}
+
+/**
+ * 获取寻源任务详情
+ */
+export async function getSourcingTask(taskId: number) {
+  const baseURL = process.env.MCP_API_BASE || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+  
+  const response = await fetch(`${baseURL}/api/sourcing-tasks/${taskId}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Actor': 'mcp-system',
+      'X-Role': 'buyer',
+    },
+  });
+  return response.json();
+}
+
+/**
+ * 更新寻源任务
+ * 支持：分配供应商、完成寻源、更新状态等
+ */
+export async function updateSourcingTask(params: {
+  taskId: number;
+  supplierId?: number;
+  supplierSnapshot?: string;
+  requirementText?: string;
+  dueDate?: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  result?: string;
+  complete?: boolean;
+  actor?: string;
+}) {
+  const baseURL = process.env.MCP_API_BASE || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+  
+  const response = await fetch(`${baseURL}/api/sourcing-tasks/${params.taskId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Actor': params.actor || 'mcp-system',
+      'X-Role': 'buyer',
+    },
+    body: JSON.stringify({
+      supplierId: params.supplierId,
+      supplierSnapshot: params.supplierSnapshot,
+      requirementText: params.requirementText,
+      dueDate: params.dueDate,
+      status: params.status,
+      result: params.result,
+      complete: params.complete,
+    }),
+  });
+  return response.json();
+}
+
+/**
  * 创建报价单
  */
 export async function createQuote(params: {

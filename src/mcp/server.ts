@@ -7,7 +7,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp';
-import http from 'node:http';
+import * as http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
@@ -213,6 +213,45 @@ registerProcurementTool('list_sourcing_tasks', {
   }),
 }, async ({ status, prId }: { status?: string; prId?: number }) => {
   const result = await procurementTools.listSourcingTasks({ status, prId });
+  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+});
+
+server.registerTool('get_pending_sourcing', {
+  description: '获取待寻源的采购申请行（FA匹配失败或需要寻源的PR行）',
+  inputSchema: z.object({
+    page: z.number().optional().describe('页码'),
+    pageSize: z.number().optional().describe('每页数量'),
+  }),
+}, async ({ page, pageSize }: { page?: number; pageSize?: number }) => {
+  const result = await procurementTools.getPendingSourcing({ page, pageSize });
+  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+});
+
+server.registerTool('get_sourcing_task', {
+  description: '获取寻源任务详情',
+  inputSchema: z.object({
+    taskId: z.number().describe('寻源任务ID'),
+  }),
+}, async ({ taskId }: { taskId: number }) => {
+  const result = await procurementTools.getSourcingTask(taskId);
+  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+});
+
+server.registerTool('update_sourcing_task', {
+  description: '更新寻源任务（分配供应商、完成寻源等）',
+  inputSchema: z.object({
+    taskId: z.number().describe('寻源任务ID'),
+    supplierId: z.number().optional().describe('供应商ID'),
+    supplierSnapshot: z.string().optional().describe('供应商名称（当供应商ID不存在时使用）'),
+    requirementText: z.string().optional().describe('需求描述'),
+    dueDate: z.string().optional().describe('截止日期'),
+    status: z.enum(['pending', 'in_progress', 'completed', 'cancelled']).optional().describe('状态'),
+    result: z.string().optional().describe('寻源结果说明'),
+    complete: z.boolean().optional().describe('快捷完成（需先指定供应商）'),
+    actor: z.string().optional().describe('操作人'),
+  }),
+}, async (args: { taskId: number; supplierId?: number; supplierSnapshot?: string; requirementText?: string; dueDate?: string; status?: 'pending' | 'in_progress' | 'completed' | 'cancelled'; result?: string; complete?: boolean; actor?: string }) => {
+  const result = await procurementTools.updateSourcingTask(args);
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
@@ -476,7 +515,7 @@ const httpServer = http.createServer((req, res) => {
 
 httpServer.listen(MCP_PORT, MCP_HOST, () => {
   console.log(`MCP Server running on ${MCP_HOST}:${MCP_PORT}`);
-  console.log('Available tools: match_material, list_materials, create_material, list_suppliers, create_supplier, create_purchase_request, list_purchase_requests, submit_purchase_request, create_sourcing_task, list_sourcing_tasks, create_quote, award_quote, create_purchase_order, send_purchase_order, list_purchase_orders, create_goods_receipt, list_goods_receipts, match_framework_agreement');
+  console.log('Available tools: match_material, list_materials, create_material, list_suppliers, create_supplier, create_purchase_request, list_purchase_requests, submit_purchase_request, create_sourcing_task, list_sourcing_tasks, get_pending_sourcing, get_sourcing_task, update_sourcing_task, create_quote, award_quote, create_purchase_order, send_purchase_order, list_purchase_orders, create_goods_receipt, list_goods_receipts, match_framework_agreement');
 });
 
 // 优雅关闭

@@ -404,6 +404,29 @@ POST /api/contracts/{id}/submit
 ### 4. 寻源与报价
 
 ```bash
+# 获取待寻源的采购申请行（FA匹配失败或需要寻源的PR行）
+GET /api/sourcing-tasks/pending
+-H "X-Actor: buyer-agent"
+
+# 获取寻源任务详情
+GET /api/sourcing-tasks/{id}
+-H "X-Actor: buyer-agent"
+
+# 更新寻源任务（分配供应商、完成寻源等）
+PUT /api/sourcing-tasks/{id}
+-H "X-Actor: buyer-agent"
+{
+  "supplierId": 1,
+  "result": "找到合适供应商"
+}
+
+# 或使用快捷完成
+PUT /api/sourcing-tasks/{id}
+{
+  "supplierId": 1,
+  "complete": true
+}
+
 # 创建报价单
 POST /api/quotes
 {
@@ -417,6 +440,12 @@ POST /api/quotes
 PUT /api/quotes/{id}
 {"awarded": "winner"}
 ```
+
+**寻源任务状态**：
+- `pending` - 待处理
+- `in_progress` - 进行中
+- `completed` - 已完成
+- `cancelled` - 已取消
 
 ### 5. 采购订单 (PO)
 
@@ -537,26 +566,29 @@ pnpm start:mcp
 
 ### MCP 工具列表
 
-| 工具名称 | 说明 |
-|----------|------|
-| `match_material` | 检查物料是否已存在 |
-| `list_materials` | 查询物料列表 |
-| `create_material` | 创建新物料 |
-| `list_suppliers` | 查询供应商列表 |
-| `create_supplier` | 创建新供应商 |
-| `create_purchase_request` | 创建采购申请 |
-| `list_purchase_requests` | 查询采购申请列表 |
-| `submit_purchase_request` | 提交采购申请 |
-| `create_sourcing_task` | 创建寻源任务 |
-| `list_sourcing_tasks` | 查询寻源任务列表 |
-| `create_quote` | 创建报价单 |
-| `award_quote` | 授标报价单 |
-| `create_purchase_order` | 创建采购订单 |
-| `send_purchase_order` | 发送采购订单 |
-| `list_purchase_orders` | 查询采购订单列表 |
-| `create_goods_receipt` | 创建收货单 |
-| `list_goods_receipts` | 查询收货单列表 |
-| `match_framework_agreement` | 查询框架协议匹配 |
+| 工具名称 | 说明 | 角色 |
+|----------|------|------|
+| `match_material` | 检查物料是否已存在 | 所有 |
+| `list_materials` | 查询物料列表 | 所有 |
+| `create_material` | 创建新物料 | 所有 |
+| `list_suppliers` | 查询供应商列表 | buyer/manager |
+| `create_supplier` | 创建新供应商 | buyer/manager |
+| `create_purchase_request` | 创建采购申请 | requester |
+| `list_purchase_requests` | 查询采购申请列表 | 所有 |
+| `submit_purchase_request` | 提交采购申请 | requester |
+| `create_sourcing_task` | 创建寻源任务 | buyer |
+| `list_sourcing_tasks` | 查询寻源任务列表 | buyer/manager |
+| `get_pending_sourcing` | 获取待寻源的PR行 | buyer/manager |
+| `get_sourcing_task` | 获取寻源任务详情 | buyer/manager |
+| `update_sourcing_task` | 更新寻源任务 | buyer |
+| `create_quote` | 创建报价单 | buyer |
+| `award_quote` | 授标报价单 | buyer |
+| `create_purchase_order` | 创建采购订单 | buyer |
+| `send_purchase_order` | 发送采购订单 | buyer |
+| `list_purchase_orders` | 查询采购订单列表 | 所有 |
+| `create_goods_receipt` | 创建收货单 | buyer |
+| `list_goods_receipts` | 查询收货单列表 | buyer/manager |
+| `match_framework_agreement` | 查询框架协议匹配 | buyer |
 
 ### MCP 协议示例
 
