@@ -3,13 +3,14 @@
  * 
  * Agent-first 模型：
  * - 每个 Agent 有唯一 agent_id 和固定 role
- * - 调用 API 时只需传 X-Actor: agent_id，无需每次传 X-Role
- * - 系统从 agent_bindings 表查询该 agent_id 对应的 role
- * - 显式传 X-Role 时优先使用
+ * - 支持两种认证方式：
+ *   1. X-API-Key: API Key 验证（安全，推荐生产使用）
+ *   2. X-Actor + X-Role: 简单身份标识（仅开发环境）
  */
 
 import { NextRequest } from 'next/server';
 import { resolveRoleByAgentId, type Role } from '@/storage/database/agent-binding';
+import { verifyApiKeyHeader } from '@/lib/api-key';
 
 // 角色类型
 export type UserRole = 'requester' | 'buyer' | 'manager';
@@ -17,16 +18,29 @@ export type UserRole = 'requester' | 'buyer' | 'manager';
 /**
  * 获取用户身份与角色（Agent-first）
  * 
- * 1. 先从 agent_bindings 表查询 X-Actor 对应的 role（权威来源）
- * 2. 如果表中有记录，使用表中的角色（忽略 X-Role）
- * 3. 如果表中无记录，使用显式传递的 X-Role
- * 4. 都未提供则默认 requester
+ * 认证优先级：
+ * 1. X-API-Key: API Key 验证（最高优先级，权威来源）
+ * 2. X-Actor: 从 agent_bindings 表查询 role
+ * 3. X-Role: 显式传递的角色（仅在无绑定记录时使用）
+ * 4. 默认 requester
  */
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
+  // 1. 优先验证 API Key（最安全）
+  const apiKey = request.headers.get('X-API-Key');
+  if (apiKey) {
+    const verified = await verifyApiKeyHeader(apiKey);
+    if (verified) {
+      return { actor: verified.agentId, role: verified.role as UserRole };
+    }
+    // API Key 无效时，不降级到其他认证方式，直接拒绝
+    return { actor: 'anonymous', role: 'requester' };
+  }
+
+  // 2. X-Actor 方式
   const actor = request.headers.get('X-Actor') || 'anonymous';
   const explicitRole = request.headers.get('X-Role') as UserRole | null;
 
-  // 优先从 agent_bindings 表查询（权威来源）
+  // 从 agent_bindings 表查询（权威来源）
   const bindingRole = await resolveRoleByAgentId(actor);
   
   // 如果 agent_bindings 中有记录，使用表中的角色（不可被前端覆盖）

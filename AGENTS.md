@@ -168,22 +168,58 @@ User-Agent: ProcurementSystem-Webhook/1.0
 }
 ```
 
+## 身份识别
+
+| 请求头 | 说明 | 可选值 |
+|--------|------|--------|
+| `X-API-Key` | API Key 验证（**推荐生产使用**） | `sk_xxx` 格式 |
+| `X-Actor` | Agent 标识（简单模式） | `my-agent`, `coze_bot_001` 等 |
+| `X-Role` | 角色（可选） | `requester`, `buyer`, `manager` |
+
+**认证优先级**：
+1. `X-API-Key`（最高）：API Key 验证，权威来源，不可伪造
+2. `X-Actor`：从 `agent_bindings` 表查询角色
+3. `X-Role`：显式传递（仅在无绑定记录时使用）
+
+**注意**：
+- 不传 `X-Role` 时，系统从 `agent_bindings` 表查询该 Agent 的角色
+- 使用 `X-API-Key` 时，无需传 `X-Actor` 和 `X-Role`，系统自动解析
+
+### API Key 管理
+
 ```bash
-# 只需传 X-Actor，系统自动解析角色
+# Manager 为 Agent 生成 API Key
+POST /api/agent-bindings/{id}/api-key
+-H "X-Actor: manager-agent"
+
+# 返回示例
+{
+  "success": true,
+  "agentId": "my-buyer-agent",
+  "apiKey": "sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "message": "请妥善保管 API Key，创建后无法再次查看明文"
+}
+
+# Manager 清除 Agent 的 API Key
+DELETE /api/agent-bindings/{id}/api-key
+-H "X-Actor: manager-agent"
+```
+
+### 使用 API Key 调用
+
+```bash
+# 使用 API Key（推荐）
+curl -X POST http://localhost:5000/api/purchase-requests \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -d '{"reason":"采购办公用品","lines":[{"requirementText":"A4纸","quantity":100}]}'
+
+# 简单模式（仅开发/内网）
 curl -X POST http://localhost:5000/api/purchase-requests \
   -H "Content-Type: application/json" \
   -H "X-Actor: my-procurement-agent" \
   -d '{"reason":"采购办公用品","lines":[{"requirementText":"A4纸","quantity":100}]}'
 ```
-
-## 身份识别
-
-| 请求头 | 说明 | 可选值 |
-|--------|------|--------|
-| `X-Actor` | Agent 标识（必填） | `my-agent`, `coze_bot_001` 等 |
-| `X-Role` | 角色（可选） | `requester`, `buyer`, `manager` |
-
-**注意**：不传 `X-Role` 时，系统从 `agent_bindings` 表查询该 Agent 的角色。
 
 ## 角色权限
 
