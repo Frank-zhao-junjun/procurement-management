@@ -52,6 +52,13 @@ export async function PUT(
     // 构建更新数据
     const updateData: Record<string, any> = {};
     
+    // agent_id 不可修改（核心标识）
+    if (body.agentId !== undefined) {
+      return NextResponse.json({ 
+        error: 'agent_id 是核心标识，注册后不可修改' 
+      }, { status: 400 });
+    }
+    
     // 角色更新：只有 Manager 可以更新
     if (body.role !== undefined) {
       if (currentRole !== 'manager') {

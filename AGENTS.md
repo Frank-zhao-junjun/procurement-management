@@ -178,8 +178,12 @@ User-Agent: ProcurementSystem-Webhook/1.0
 
 **认证优先级**：
 1. `X-API-Key`（最高）：API Key 验证，权威来源，不可伪造
-2. `X-Actor`：从 `agent_bindings` 表查询角色
-3. `X-Role`：显式传递（仅在无绑定记录时使用）
+2. `X-Actor`：从 `agent_bindings` 表查询角色（**必须已注册**）
+
+**安全约束**：
+- `X-Actor` 必须已在 `agent_bindings` 中注册，未注册的 Actor 请求将被拒绝
+- 使用 `X-API-Key` 时，若同时传 `X-Actor`，两者必须匹配
+- `agent_id` 是核心标识，**注册后不可修改**
 
 **注意**：
 - 不传 `X-Role` 时，系统从 `agent_bindings` 表查询该 Agent 的角色
@@ -203,6 +207,15 @@ POST /api/agent-bindings/{id}/api-key
 # Manager 清除 Agent 的 API Key
 DELETE /api/agent-bindings/{id}/api-key
 -H "X-Actor: manager-agent"
+```
+
+### Agent ID 不可修改
+
+```bash
+# 尝试修改 agent_id 会被拒绝
+PUT /api/agent-bindings/{id}
+{"agentId": "new-id"}
+# 返回: {"error": "agent_id 是核心标识，注册后不可修改"}
 ```
 
 ### 使用 API Key 调用

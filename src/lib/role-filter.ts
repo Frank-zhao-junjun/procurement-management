@@ -27,36 +27,39 @@ export type UserRole = 'requester' | 'buyer' | 'manager';
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
   // 1. 优先验证 API Key（最安全）
   const apiKey = request.headers.get('X-API-Key');
+  const xActor = request.headers.get('X-Actor');
+
   if (apiKey) {
     const verified = await verifyApiKeyHeader(apiKey);
     if (verified) {
+      // 如果同时传了 X-Actor，必须与 API Key 对应的 agent_id 一致
+      if (xActor && xActor !== verified.agentId) {
+        // X-Actor 与 API Key 不匹配，拒绝请求
+        return { actor: 'anonymous', role: 'requester' };
+      }
       return { actor: verified.agentId, role: verified.role as UserRole };
     }
-    // API Key 无效时，不降级到其他认证方式，直接拒绝
+    // API Key 无效时，直接拒绝（不降级）
     return { actor: 'anonymous', role: 'requester' };
   }
 
-  // 2. X-Actor 方式
-  const actor = request.headers.get('X-Actor') || 'anonymous';
-  const explicitRole = request.headers.get('X-Role') as UserRole | null;
-
-  // 从 agent_bindings 表查询（权威来源）
-  const bindingRole = await resolveRoleByAgentId(actor);
-  
-  // 如果 agent_bindings 中有记录，使用表中的角色（不可被前端覆盖）
-  if (bindingRole) {
-    return { actor, role: bindingRole };
+  // 2. X-Actor 方式（无 API Key）
+  // 安全校验：X-Actor 必须已在 agent_bindings 中注册
+  if (xActor) {
+    const bindingRole = await resolveRoleByAgentId(xActor);
+    
+    // 如果 agent_bindings 中有记录，使用表中的角色
+    if (bindingRole) {
+      // 不接受 X-Role 覆盖，使用绑定记录的角色
+      return { actor: xActor, role: bindingRole };
+    }
+    
+    // X-Actor 未注册，拒绝请求（防止伪造）
+    return { actor: 'anonymous', role: 'requester' };
   }
 
-  // 如果表中无记录，使用显式传递的角色
-  let role = explicitRole;
-
-  // 验证角色有效性
-  if (!role || !['requester', 'buyer', 'manager'].includes(role)) {
-    role = 'requester'; // 默认降级为 requester
-  }
-
-  return { actor, role };
+  // 3. 无任何身份标识，默认 requester
+  return { actor: 'anonymous', role: 'requester' };
 }
 
 // 向后兼容别名
