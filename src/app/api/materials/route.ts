@@ -52,17 +52,18 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/materials - 创建物料
-// 仅 buyer 和 manager 可创建
+// 仅 buyer, manager, requester 可创建
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
-    const body = await request.json();
 
-    // 所有角色都可以创建物料（需求人提交采购申请时可能需要新建物料）
-    if (role !== 'buyer' && role !== 'manager' && role !== 'requester') {
+    // 权限检查：buyer, manager, requester 可以创建物料
+    if (!role || !['buyer', 'manager', 'requester'].includes(role)) {
       return NextResponse.json({ error: '无权限创建物料' }, { status: 403 });
     }
+
+    const body = await request.json();
 
     // 清理和验证输入
     const trimmed = trimStrings(body);

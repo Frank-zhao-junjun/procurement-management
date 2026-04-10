@@ -122,3 +122,33 @@ export async function clearAgentApiKey(
 
   return { success: true };
 }
+
+/**
+ * 根据 API Key 获取角色信息（用于权限检查）
+ */
+export async function getApiKeyRole(
+  apiKey: string
+): Promise<{ agentId: string; role: Role } | null> {
+  if (!apiKey.startsWith(API_KEY_PREFIX)) {
+    return null;
+  }
+
+  const client = getServiceRoleClient();
+  const hash = hashApiKey(apiKey);
+
+  const { data, error } = await client
+    .from('agent_bindings')
+    .select('agent_id, role')
+    .eq('api_key_hash', hash)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return {
+    agentId: data.agent_id as string,
+    role: data.role as Role,
+  };
+}

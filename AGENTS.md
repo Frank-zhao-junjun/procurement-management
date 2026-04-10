@@ -238,11 +238,65 @@ curl -X POST http://localhost:5000/api/purchase-requests \
 
 ## 角色权限
 
+### 粗粒度权限（基础角色）
+
 | 角色 | 可创建 | 可查看 | 可审批 |
 |------|--------|--------|--------|
 | `requester` | PR, Material | 自己PR对应数据 | - |
 | `buyer` | PO, Quote, SC, FA, Material | 所有采购数据 | - |
 | `manager` | - | 所有数据 | PR, 超收收货 |
+
+### 细粒度权限（详细矩阵）
+
+| 资源 | 操作 | buyer | requester | manager |
+|------|------|-------|-----------|---------|
+| **物料 (materials)** | 列表/详情 | ✅ | ✅ | ✅ |
+| | 创建 | ✅ | ✅ | ✅ |
+| **供应商 (suppliers)** | 列表/详情 | ✅ | ✅ (只读) | ✅ (只读) |
+| | 创建 | ✅ | ❌ | ❌ |
+| **采购申请 (purchase_requests)** | 列表/详情 | ✅ | ✅ | ✅ |
+| | 创建 | ❌ | ✅ | ❌ |
+| | 提交 | ❌ | ✅ | ❌ |
+| | 审批 | ❌ | ❌ | ✅ |
+| **寻源任务 (sourcing_tasks)** | 列表/详情 | ✅ | ✅ (关联PR) | ✅ |
+| | 创建 | ✅ | ❌ | ❌ |
+| | 更新 | ✅ | ❌ | ❌ |
+| **报价单 (quotes)** | 列表/详情 | ✅ | ✅ (只读) | ✅ (只读) |
+| | 创建 | ✅ | ❌ | ❌ |
+| | 授标 | ✅ | ❌ | ❌ |
+| **框架协议 (framework_agreements)** | 列表/详情 | ✅ | ✅ (只读) | ✅ |
+| | 审批 | ❌ | ❌ | ✅ |
+| **采购订单 (purchase_orders)** | 列表/详情 | ✅ | ✅ (关联PR) | ✅ |
+| | 创建 | ✅ | ❌ | ❌ |
+| | 发送 | ✅ | ❌ | ❌ |
+| **收货单 (goods_receipts)** | 列表/详情 | ✅ | ✅ | ✅ |
+| | 创建 | ✅ | ✅ | ❌ |
+| | 超收审批 | ❌ | ❌ | ✅ |
+
+### MCP 工具权限
+
+MCP 工具权限与 REST API 权限对齐：
+
+| 工具 | buyer | requester | manager |
+|------|-------|-----------|---------|
+| match_material | ✅ | ✅ | ✅ |
+| list_materials | ✅ | ✅ | ✅ |
+| create_material | ✅ | ✅ | ✅ |
+| list_suppliers | ✅ | ✅ | ✅ |
+| create_supplier | ✅ | ❌ | ❌ |
+| create_purchase_request | ❌ | ✅ | ❌ |
+| list_purchase_requests | ✅ | ✅ | ✅ |
+| submit_purchase_request | ❌ | ✅ | ❌ |
+| create_sourcing_task | ✅ | ❌ | ❌ |
+| list_sourcing_tasks | ✅ | ✅ | ✅ |
+| get_pending_sourcing | ✅ | ❌ | ✅ |
+| update_sourcing_task | ✅ | ❌ | ❌ |
+| create_quote | ✅ | ❌ | ❌ |
+| award_quote | ✅ | ❌ | ❌ |
+| create_purchase_order | ✅ | ❌ | ❌ |
+| send_purchase_order | ✅ | ❌ | ❌ |
+| create_goods_receipt | ✅ | ✅ | ❌ |
+| list_goods_receipts | ✅ | ✅ | ✅ |
 
 ## 完整业务流程
 

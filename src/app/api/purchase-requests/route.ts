@@ -67,6 +67,12 @@ export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
     const { actor, role } = await getUserIdentityWithLookup(request);
+
+    // 权限检查：只有 requester 可以创建采购申请
+    if (role !== 'requester') {
+      return NextResponse.json({ error: '只有需求人可以创建采购申请' }, { status: 403 });
+    }
+
     const body = await request.json();
 
     // 验证必输字段
