@@ -9,6 +9,17 @@ import { getSupabaseClient } from '@/storage/database';
 import { getUserIdentityWithLookup } from '@/lib/role-filter';
 import { getBeijingISOString } from '@/lib/datetime';
 
+/**
+ * 大小写不敏感的 header 读取
+ */
+function getHeader(request: NextRequest, name: string): string | null {
+  const value = request.headers.get(name);
+  if (value) return value;
+  const lowerValue = request.headers.get(name.toLowerCase());
+  if (lowerValue) return lowerValue;
+  return request.headers.get(name.toUpperCase());
+}
+
 // POST /api/purchase-requests/{id}/withdraw - 撤回采购申请
 export async function POST(
   request: NextRequest,
@@ -50,7 +61,7 @@ export async function POST(
             expectedApplicant: existing.applicant,
             actualActor: actor,
             match: existing.applicant === actor,
-            headerXActor: request.headers.get('X-Actor'),
+            headerXActor: getHeader(request, 'X-Actor'),
           }
         },
         { status: 403 }

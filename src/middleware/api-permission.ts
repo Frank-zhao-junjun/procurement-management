@@ -10,6 +10,17 @@ import { checkApiPermission } from '@/lib/permissions';
 import { getByAgentId } from '@/storage/database/agent-binding';
 import { getApiKeyRole } from '@/lib/api-key';
 
+/**
+ * 大小写不敏感的 header 读取
+ */
+function getHeader(request: NextRequest, name: string): string | null {
+  const value = request.headers.get(name);
+  if (value) return value;
+  const lowerValue = request.headers.get(name.toLowerCase());
+  if (lowerValue) return lowerValue;
+  return request.headers.get(name.toUpperCase());
+}
+
 // ============ 权限检查入口 ============
 
 /**
@@ -24,7 +35,7 @@ export async function checkRequestPermission(
   agentId?: string;
 }> {
   // 1. 尝试 API Key 认证
-  const apiKey = request.headers.get('X-API-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
+  const apiKey = getHeader(request, 'X-API-Key') || request.headers.get('Authorization')?.replace('Bearer ', '');
   if (apiKey) {
     const apiKeyInfo = await getApiKeyRole(apiKey);
     if (apiKeyInfo) {
@@ -42,7 +53,7 @@ export async function checkRequestPermission(
   }
 
   // 2. 尝试 X-Actor 认证
-  const actor = request.headers.get('X-Actor');
+  const actor = getHeader(request, 'X-Actor');
   if (actor) {
     const binding = await getByAgentId(actor);
     if (!binding) {
