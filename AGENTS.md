@@ -173,20 +173,22 @@ User-Agent: ProcurementSystem-Webhook/1.0
 | 请求头 | 说明 | 可选值 |
 |--------|------|--------|
 | `X-API-Key` | API Key 验证（**推荐生产使用**） | `sk_xxx` 格式 |
-| `X-Actor` | Agent 标识（简单模式） | `my-agent`, `coze_bot_001` 等 |
-| `X-Role` | 角色（可选） | `requester`, `buyer`, `manager` |
+| `X-Actor` | Agent 标识（已注册 Agent） | `my-agent`, `coze_bot_001` 等 |
+| `X-Role` | **已禁用**（防止角色伪造） | - |
 
 **认证优先级**：
 1. `X-API-Key`（最高）：API Key 验证，权威来源，不可伪造
-2. `X-Actor`：从 `agent_bindings` 表查询角色（**必须已注册**）
+2. `X-Actor`：从 `agent_bindings` 表查询角色（**仅限已注册 Agent**）
 
-**安全约束**：
-- `X-Actor` 必须已在 `agent_bindings` 中注册，未注册的 Actor 请求将被拒绝
+**安全约束（角色不可伪造）**：
+- `X-Role` 已**完全禁用**，Agent 无法通过请求头更改自己的角色
+- `X-Actor` 必须已在 `agent_bindings` 中注册，未注册 Agent 请求将被拒绝
 - 使用 `X-API-Key` 时，若同时传 `X-Actor`，两者必须匹配
 - `agent_id` 是核心标识，**注册后不可修改**
+- 角色由 Manager 在注册时固定，Agent 无法自行更改
 
 **注意**：
-- 不传 `X-Role` 时，系统从 `agent_bindings` 表查询该 Agent 的角色
+- Agent 角色由系统管理，存储在 `agent_bindings` 表中
 - 使用 `X-API-Key` 时，无需传 `X-Actor` 和 `X-Role`，系统自动解析
 
 ### API Key 管理

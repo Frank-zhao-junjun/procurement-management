@@ -1,11 +1,13 @@
 /**
  * 角色权限过滤工具 (§2.4)
  * 
- * Agent-first 模型：
+ * Agent-first 模型（安全加固版）：
  * - 每个 Agent 有唯一 agent_id 和固定 role
- * - 支持两种认证方式：
- *   1. X-API-Key: API Key 验证（安全，推荐生产使用）
- *   2. X-Actor + X-Role: 简单身份标识（仅开发环境）
+ * - Agent 角色在注册时固定，之后不可通过请求头更改
+ * - 支持两种认证方式（按优先级）：
+ *   1. X-API-Key: API Key 验证（最安全，推荐生产使用）
+ *   2. X-Actor: 从 agent_bindings 表查询角色（仅限已注册 Agent）
+ * - X-Role 请求头：已完全禁用（防止角色伪造）
  */
 
 import { NextRequest } from 'next/server';
@@ -15,51 +17,67 @@ import { verifyApiKeyHeader } from '@/lib/api-key';
 // 角色类型
 export type UserRole = 'requester' | 'buyer' | 'manager';
 
+// 允许的角色列表（注册时必须从中选择）
+export const ALLOWED_ROLES: UserRole[] = ['requester', 'buyer', 'manager'];
+
 /**
- * 获取用户身份与角色（Agent-first）
+ * 获取用户身份与角色（Agent-first 安全版）
  * 
- * 认证优先级：
- * 1. X-API-Key: API Key 验证（最高优先级，权威来源）
- * 2. X-Actor: 从 agent_bindings 表查询 role
- * 3. X-Role: 显式传递的角色（仅在无绑定记录时使用）
- * 4. 默认 requester
+ * 认证规则：
+ * 1. X-API-Key: API Key 验证（最高优先级）
+ *    - 验证通过后，使用 API Key 对应的 agent_id 和 role
+ *    - 如果同时传了 X-Actor，必须与 API Key 匹配
+ * 2. X-Actor: 仅限已注册的 Agent
+ *    - 必须已在 agent_bindings 中注册
+ *    - 使用数据库中注册的角色，不可被请求头覆盖
+ * 3. X-Role: 已完全禁用（返回 400 错误）
+ * 4. 默认: anonymous（无权限）
+ * 
+ * 重要：角色由系统管理，Agent 无法通过任何请求头更改自己的角色！
  */
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
-  // 1. 优先验证 API Key（最安全）
   const apiKey = request.headers.get('X-API-Key');
   const xActor = request.headers.get('X-Actor');
 
+  // 1. API Key 验证（最安全）
   if (apiKey) {
     const verified = await verifyApiKeyHeader(apiKey);
     if (verified) {
-      // 如果同时传了 X-Actor，必须与 API Key 对应的 agent_id 一致
+      // API Key 验证通过，使用对应的身份
       if (xActor && xActor !== verified.agentId) {
-        // X-Actor 与 API Key 不匹配，拒绝请求
+        // 安全警告：X-Actor 与 API Key 不匹配
+        console.warn(`[Security] X-Actor mismatch: header=${xActor}, key=${verified.agentId}`);
         return { actor: 'anonymous', role: 'requester' };
       }
       return { actor: verified.agentId, role: verified.role as UserRole };
     }
-    // API Key 无效时，直接拒绝（不降级）
+    // API Key 无效，拒绝请求
     return { actor: 'anonymous', role: 'requester' };
   }
 
-  // 2. X-Actor 方式（无 API Key）
-  // 安全校验：X-Actor 必须已在 agent_bindings 中注册
+  // 2. X-Actor 验证（仅限已注册 Agent）
   if (xActor) {
     const bindingRole = await resolveRoleByAgentId(xActor);
     
-    // 如果 agent_bindings 中有记录，使用表中的角色
     if (bindingRole) {
-      // 不接受 X-Role 覆盖，使用绑定记录的角色
+      // 已注册 Agent：使用数据库中的固定角色
       return { actor: xActor, role: bindingRole };
     }
     
-    // X-Actor 未注册，拒绝请求（防止伪造）
+    // 未注册 Agent：拒绝请求
+    console.warn(`[Security] Unregistered agent attempted access: ${xActor}`);
     return { actor: 'anonymous', role: 'requester' };
   }
 
-  // 3. 无任何身份标识，默认 requester
+  // 3. 无身份标识
   return { actor: 'anonymous', role: 'requester' };
+}
+
+/**
+ * 验证角色是否合法
+ */
+export function isValidRole(role: string): role is UserRole {
+  return ALLOWED_ROLES.includes(role as UserRole);
 }
 
 // 向后兼容别名
