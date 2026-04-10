@@ -1,6 +1,6 @@
 /**
- * 角色权限过滤工具 (§2.4)
- * 
+ * REST API 角色权限过滤工具
+ *
  * Agent-first 模型（安全加固版）：
  * - 每个 Agent 有唯一 agent_id 和固定 role
  * - Agent 角色在注册时固定，之后不可通过请求头更改
@@ -21,6 +21,23 @@ export type UserRole = 'requester' | 'buyer' | 'manager';
 export const ALLOWED_ROLES: UserRole[] = ['requester', 'buyer', 'manager'];
 
 /**
+ * 大小写不敏感的 header 读取
+ * HTTP Headers 在 Node.js 中是大小写敏感的，但客户端可能发送不同大小写
+ */
+function getHeader(request: NextRequest, name: string): string | null {
+  // 尝试原始名称
+  const value = request.headers.get(name);
+  if (value) return value;
+  
+  // 尝试全小写
+  const lowerValue = request.headers.get(name.toLowerCase());
+  if (lowerValue) return lowerValue;
+  
+  // 尝试全大写
+  return request.headers.get(name.toUpperCase());
+}
+
+/**
  * 获取用户身份与角色（Agent-first 安全版）
  * 
  * 认证规则：
@@ -36,8 +53,8 @@ export const ALLOWED_ROLES: UserRole[] = ['requester', 'buyer', 'manager'];
  * 重要：角色由系统管理，Agent 无法通过任何请求头更改自己的角色！
  */
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
-  const apiKey = request.headers.get('X-API-Key');
-  const xActor = request.headers.get('X-Actor');
+  const apiKey = getHeader(request, 'X-API-Key');
+  const xActor = getHeader(request, 'X-Actor');
 
   // 1. API Key 验证（最安全）
   if (apiKey) {

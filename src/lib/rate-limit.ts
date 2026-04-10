@@ -10,6 +10,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+/**
+ * 大小写不敏感的 header 读取
+ */
+function getHeader(request: NextRequest, name: string): string | null {
+  const value = request.headers.get(name);
+  if (value) return value;
+  const lowerValue = request.headers.get(name.toLowerCase());
+  if (lowerValue) return lowerValue;
+  return request.headers.get(name.toUpperCase());
+}
+
 // ============ 配置 ============
 
 interface RateLimitConfig {
@@ -65,7 +76,7 @@ function cleanupExpiredEntries() {
  */
 function getRateLimitKey(request: NextRequest): string {
   // 1. 优先使用 API Key（最准确）
-  const apiKey = request.headers.get('X-API-Key');
+  const apiKey = getHeader(request, 'X-API-Key');
   if (apiKey) {
     // 使用 API Key 的哈希作为标识
     const hash = hashString(apiKey);
@@ -73,15 +84,15 @@ function getRateLimitKey(request: NextRequest): string {
   }
 
   // 2. 使用 X-Actor
-  const actor = request.headers.get('X-Actor');
+  const actor = getHeader(request, 'X-Actor');
   if (actor) {
     return `actor:${actor}`;
   }
 
   // 3. 使用 IP 地址
-  const forwarded = request.headers.get('x-forwarded-for');
-  const ip = forwarded?.split(',')[0]?.trim() 
-    || request.headers.get('x-real-ip')
+  const forwarded = getHeader(request, 'x-forwarded-for');
+  const ip = forwarded?.split(',')[0]?.trim()
+    || getHeader(request, 'x-real-ip')
     || 'unknown';
   return `ip:${ip}`;
 }
