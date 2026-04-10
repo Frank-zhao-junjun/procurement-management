@@ -42,8 +42,17 @@ export async function POST(
 
     // 权限检查：只有申请人可以撤回自己的 PR
     if (existing.applicant !== actor) {
+      console.error(`[Auth Error] 撤回被拒绝: applicant="${existing.applicant}", actor="${actor}"`);
       return NextResponse.json(
-        { error: '只有申请人可以撤回采购申请' },
+        { 
+          error: '只有申请人可以撤回采购申请',
+          debug: {
+            expectedApplicant: existing.applicant,
+            actualActor: actor,
+            match: existing.applicant === actor,
+            headerXActor: request.headers.get('X-Actor'),
+          }
+        },
         { status: 403 }
       );
     }

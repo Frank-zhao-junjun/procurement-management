@@ -50,12 +50,17 @@ export async function PUT(
     const body = await request.json();
     const { actor, role } = await getUserIdentityWithLookup(request);
 
+    // 调试日志
+    console.log(`[DEBUG PUT PR] id=${id}, actor="${actor}", role="${role}", applicant will be fetched`);
+
     // 查询当前 PR 状态
     const { data: existing, error: findError } = await client
       .from('purchase_requests')
       .select('id, status, applicant')
       .eq('id', parseInt(id, 10))
       .single();
+
+    console.log(`[DEBUG PUT PR] existing.applicant="${existing?.applicant}", actor="${actor}", match=${existing?.applicant === actor}`);
 
     if (findError) {
       return NextResponse.json({ error: findError.message }, { status: 500 });
@@ -67,8 +72,17 @@ export async function PUT(
 
     // 权限检查：只有申请人可以修改自己的 PR
     if (existing.applicant !== actor) {
+      console.error(`[Auth Error] 修改被拒绝: applicant="${existing.applicant}", actor="${actor}"`);
       return NextResponse.json(
-        { error: '只有申请人可以修改采购申请' },
+        { 
+          error: '只有申请人可以修改采购申请',
+          debug: {
+            expectedApplicant: existing.applicant,
+            actualActor: actor,
+            match: existing.applicant === actor,
+            headerXActor: request.headers.get('X-Actor'),
+          }
+        },
         { status: 403 }
       );
     }
