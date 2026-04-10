@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
 import { materials, insertMaterialSchema, auditLogs } from '@/storage/database/shared/schema';
 import { getUserIdentityWithLookup, type Role } from '@/lib/role-filter';
+import { 
+  materialSchema, 
+  trimStrings, 
+  createValidationErrorResponse 
+} from '@/lib/validation';
 import { z } from 'zod';
 
 // GET /api/materials - 获取物料列表
@@ -59,21 +64,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '无权限创建物料' }, { status: 403 });
     }
 
-    // 验证输入
-    const parsed = insertMaterialSchema.safeParse(body);
-    if (!parsed.success) {
+    // 清理和验证输入
+    const trimmed = trimStrings(body);
+    const validation = materialSchema.safeParse(trimmed);
+    
+    if (!validation.success) {
       return NextResponse.json(
-        { error: 'Invalid input', details: parsed.error.issues },
+        createValidationErrorResponse({
+          success: false,
+          errors: validation.error.issues.map((e) => ({
+            field: e.path.join('.'),
+            message: e.message,
+          })),
+        }),
         { status: 400 }
       );
     }
 
     // 转为 snake_case 以匹配 Supabase/PostgreSQL 列名
     const insertData = {
-      code: parsed.data.code,
-      name: parsed.data.name,
-      unit: parsed.data.unit,
-      is_active: parsed.data.isActive,
+      code: validation.data.code || null,
+      name: validation.data.name.trim(),
+      unit: validation.data.unit || '件',
+      is_active: true,
     };
 
     const { data: material, error } = await client

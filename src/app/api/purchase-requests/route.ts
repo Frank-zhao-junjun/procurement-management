@@ -69,12 +69,46 @@ export async function POST(request: NextRequest) {
     const { actor, role } = await getUserIdentityWithLookup(request);
     const body = await request.json();
 
+    // 验证必输字段
+    if (!body.lines && !body.items) {
+      return NextResponse.json(
+        { error: '请求参数验证失败', details: ['采购明细 (lines) 为必填字段'] },
+        { status: 400 }
+      );
+    }
+
+    const linesData = body.lines || body.items || [];
+
+    // 验证行项目必输字段
+    if (linesData.length === 0) {
+      return NextResponse.json(
+        { error: '请求参数验证失败', details: ['采购明细 (lines) 不能为空'] },
+        { status: 400 }
+      );
+    }
+
+    // 验证每行必输字段
+    const lineErrors: string[] = [];
+    for (let i = 0; i < linesData.length; i++) {
+      const line = linesData[i];
+      if (!line.requirementText && !line.materialSnapshot) {
+        lineErrors.push(`第 ${i + 1} 行: 需求描述 (requirementText) 为必填字段`);
+      }
+      if (!line.quantity || (typeof line.quantity === 'string' && line.quantity.trim() === '')) {
+        lineErrors.push(`第 ${i + 1} 行: 数量 (quantity) 为必填字段`);
+      }
+    }
+
+    if (lineErrors.length > 0) {
+      return NextResponse.json(
+        { error: '请求参数验证失败', details: lineErrors },
+        { status: 400 }
+      );
+    }
+
     // 生成 PR 编号（使用上海时区 + 99上限）
     const prNumber = await numberGenerators.pr();
 
-    // 支持 items 和 lines 两种参数格式
-    const linesData = body.lines || body.items || [];
-    
     // 构建行项目快照
     const linesSnapshot = linesData.length > 0 ? JSON.stringify(linesData) : null;
 
