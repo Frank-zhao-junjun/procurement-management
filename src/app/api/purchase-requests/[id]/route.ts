@@ -62,7 +62,9 @@ export async function PUT(
     const { actor, role } = await getUserIdentityWithLookup(request);
 
     // 调试日志
-    console.log(`[DEBUG PUT PR] id=${id}, actor="${actor}", role="${role}", applicant will be fetched`);
+    console.log(`[DEBUG PUT PR] id=${id}, actor="${actor}", role="${role}"`);
+    console.log(`[DEBUG PUT PR] headers check: raw X-Actor="${request.headers.get('X-Actor')}", raw x-actor="${request.headers.get('x-actor')}"`);
+    console.log(`[DEBUG PUT PR] getHeader result: "${getHeader(request, 'X-Actor')}"`);
 
     // 查询当前 PR 状态
     const { data: existing, error: findError } = await client

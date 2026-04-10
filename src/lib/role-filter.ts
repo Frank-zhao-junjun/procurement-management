@@ -55,6 +55,8 @@ function getHeader(request: NextRequest, name: string): string | null {
 export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
   const apiKey = getHeader(request, 'X-API-Key');
   const xActor = getHeader(request, 'X-Actor');
+  
+  console.log(`[getUserIdentity] apiKey present: ${!!apiKey}, xActor: "${xActor}"`);
 
   // 1. API Key 验证（最安全）
   if (apiKey) {
@@ -74,7 +76,9 @@ export async function getUserIdentity(request: NextRequest): Promise<{ actor: st
 
   // 2. X-Actor 验证（仅限已注册 Agent）
   if (xActor) {
+    console.log(`[getUserIdentity] Looking up agent: "${xActor}"`);
     const bindingRole = await resolveRoleByAgentId(xActor);
+    console.log(`[getUserIdentity] Found role: "${bindingRole}"`);
     
     if (bindingRole) {
       // 已注册 Agent：使用数据库中的固定角色
