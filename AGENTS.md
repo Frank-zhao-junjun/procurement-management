@@ -471,7 +471,67 @@ POST /api/purchase-request-lines/{id}/approve
 {"approved": false, "reason": "超出预算"}
 ```
 
-### 3. 框架协议匹配
+### 3. 修改与撤回已提交的采购申请
+
+```bash
+# 修改采购申请（支持草稿和待审批状态）
+PUT /api/purchase-requests/{id}
+-H "X-Actor: requester-agent"
+{
+  "reason": "更新采购原因",
+  "lines": [
+    {"requirementText": "无线鼠标", "quantity": 15}
+  ]
+}
+
+# 返回示例（待审批状态会先撤回再修改）
+{
+  "data": {...},
+  "withdrawn": true,
+  "message": "采购申请已撤回（草稿状态），修改成功。需要重新提交。"
+}
+
+# 撤回采购申请（仅待审批状态）
+POST /api/purchase-requests/{id}/withdraw
+-H "X-Actor: requester-agent"
+
+# 返回示例
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "prNumber": "PR-20250401-01",
+    "previousStatus": "pending",
+    "currentStatus": "draft"
+  },
+  "message": "采购申请已撤回，可以修改后重新提交"
+}
+
+# 检查是否可以撤回
+GET /api/purchase-requests/{id}/withdraw
+-H "X-Actor: requester-agent"
+
+# 返回示例
+{
+  "data": {
+    "id": 1,
+    "prNumber": "PR-20250401-01",
+    "status": "pending",
+    "canWithdraw": true,
+    "reason": null
+  }
+}
+```
+
+**状态规则**：
+| 当前状态 | 可修改 | 可撤回 | 说明 |
+|----------|--------|--------|------|
+| `draft` | ✅ | ❌ | 草稿状态可直接修改 |
+| `pending` | ✅ | ✅ | 待审批：修改时自动撤回为草稿，修改后需重新提交 |
+| `approved` | ❌ | ❌ | 已审批：不可修改 |
+| `rejected` | ❌ | ❌ | 已拒绝：不可修改，可删除后重新创建 |
+
+### 4. 框架协议匹配
 
 审批通过后，系统自动匹配框架协议：
 - 状态设为 `pending_confirm`（待确认，非静默）
