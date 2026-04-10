@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
 
 const PublishEventSchema = z.object({
   type: z.string().min(1, '事件类型不能为空'),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   routing: z
     .object({
       targetRoles: z.array(z.enum(['buyer', 'manager', 'requester'])).optional(),

@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Role } from '@/storage/database/agent-binding';
 import { checkApiPermission } from '@/lib/permissions';
-import { getAgentBinding } from '@/storage/database/agent-binding';
+import { getByAgentId } from '@/storage/database/agent-binding';
 import { getApiKeyRole } from '@/lib/api-key';
 
 // ============ 权限检查入口 ============
@@ -44,7 +44,7 @@ export async function checkRequestPermission(
   // 2. 尝试 X-Actor 认证
   const actor = request.headers.get('X-Actor');
   if (actor) {
-    const binding = await getAgentBinding(actor);
+    const binding = await getByAgentId(actor);
     if (!binding) {
       return { allowed: false, error: `Agent ${actor} 未注册` };
     }

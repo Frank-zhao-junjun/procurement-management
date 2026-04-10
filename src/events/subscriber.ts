@@ -210,7 +210,10 @@ export class EventSubscriber {
       }
 
       const agents = (data || [])
-        .map((s) => s.agent_bindings as { agent_id: string; role: Role; webhook_url: string | null } | null)
+        .map((s) => {
+          const bindings = s.agent_bindings as unknown as Array<{ agent_id: string; role: Role; webhook_url: string | null }> | null;
+          return bindings?.[0] || null;
+        })
         .filter((b): b is { agent_id: string; role: Role; webhook_url: string | null } => b !== null)
         .map((b) => ({
           agentId: b.agent_id,

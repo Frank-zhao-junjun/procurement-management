@@ -198,7 +198,18 @@ export class WebhookDispatcher {
       return stats;
     }
 
-    for (const delivery of pending) {
+    // 类型定义
+    type DeliveryRecord = {
+      id: string;
+      attempts: number;
+      agent_id: string;
+      event_id: number;
+      last_attempt_at: string | null;
+      created_at: string;
+      events: Record<string, unknown> | null;
+    };
+
+    for (const delivery of pending as unknown as DeliveryRecord[]) {
       stats.processed++;
 
       // 查询 Agent 的 Webhook URL
@@ -335,11 +346,19 @@ export async function dispatchEvent(deliveryId: string): Promise<{
     return { success: false, error: 'Delivery not found' };
   }
 
+  // 类型断言
+  const typedDelivery = delivery as unknown as {
+    id: string;
+    attempts: number;
+    agent_id: string;
+    events: Record<string, unknown> | null;
+  };
+
   // 查询 Webhook URL
   const { data: binding } = await client
     .from('agent_bindings')
     .select('webhook_url')
-    .eq('agent_id', delivery.agent_id)
+    .eq('agent_id', typedDelivery.agent_id)
     .eq('is_active', true)
     .maybeSingle();
 
@@ -347,12 +366,12 @@ export async function dispatchEvent(deliveryId: string): Promise<{
     return { success: false, error: 'Webhook URL not configured' };
   }
 
-  const event = delivery.events as Record<string, unknown>;
+  const event = typedDelivery.events as Record<string, unknown>;
   const result = await dispatcher.dispatch(
     deliveryId,
     binding.webhook_url,
     event,
-    delivery.attempts + 1
+    typedDelivery.attempts + 1
   );
 
   return result;

@@ -179,10 +179,11 @@ export class EventPublisher {
 
       // 为每个订阅者创建投递记录
       for (const sub of subscriptions) {
-        const agentBinding = sub.agent_bindings as {
+        const agentBindings = sub.agent_bindings as unknown as Array<{
           agent_id: string;
           role: string;
-        } | null;
+        }> | null;
+        const agentBinding = agentBindings?.[0];
 
         if (!agentBinding) continue;
 
