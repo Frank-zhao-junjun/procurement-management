@@ -604,7 +604,216 @@ POST /api/goods-receipts
 {"poLineId": 1, "quantity": 10, "grType": "out"}
 ```
 
-### 7. 查询 Agent 绑定
+### 7. 退货审批
+
+```bash
+# Manager 获取待审批退货列表
+GET /api/goods-receipts/returns/pending
+-H "X-Actor: manager-agent"
+
+# Manager 审批退货（批准）
+POST /api/goods-receipts/returns/{id}/approve
+{"approved": true, "reason": "货物质量合格，无需退货"}
+
+# Manager 审批退货（拒绝）
+POST /api/goods-receipts/returns/{id}/approve
+{"approved": false, "reason": "货物已使用，不符合退货条件"}
+```
+
+### 8. 物料历史价格查询
+
+```bash
+# 查询物料价格历史
+GET /api/materials/{id}/price-history
+
+# 返回示例
+{
+  "data": {
+    "materialId": 5,
+    "statistics": {
+      "avgPrice": 45.00,
+      "minPrice": 38,
+      "maxPrice": 52,
+      "latestPrice": 42,
+      "count": 15
+    },
+    "history": [...]
+  }
+}
+```
+
+### 9. 多供应商比价
+
+```bash
+# 按物料名称比价
+GET /api/materials/compare-price?materialName=无线鼠标
+
+# 返回示例
+{
+  "data": {
+    "totalSuppliers": 3,
+    "marketAvgPrice": 48.50,
+    "lowestPriceSupplier": {
+      "name": "小米",
+      "avgPrice": 42.00,
+      "diffFromMarket": -6.50,
+      "diffPercent": -13
+    },
+    "suppliers": [
+      {"supplierName": "小米", "avgPrice": 42.00, "quoteCount": 5, ...},
+      {"supplierName": "罗技", "avgPrice": 48.00, "quoteCount": 3, ...},
+      {"supplierName": "雷柏", "avgPrice": 55.00, "quoteCount": 2, ...}
+    ]
+  }
+}
+```
+
+### 10. 价格预警
+
+价格预警在创建报价单时自动触发。当报价高于历史均价 10% 或价格波动超过 50% 时，会触发预警事件通知 Buyer 和 Manager。
+
+```bash
+# 预警事件（自动触发，无需手动调用）
+# 事件类型: price.high, price.abnormal
+# 订阅角色: buyer, manager
+```
+
+### 11. 审计日志
+
+```bash
+# 查询审计日志
+GET /api/audit-logs?entityType=purchase_request&entityId=1
+
+# 获取实体变更历史
+GET /api/audit-logs/entity/purchase_request/1
+
+# 获取审计统计（Manager only）
+GET /api/audit-logs/statistics?from=2026-01-01&to=2026-03-31
+
+# 返回示例
+{
+  "data": {
+    "period": {"from": "2026-01-01", "to": "2026-03-31"},
+    "byEntityType": {
+      "purchase_request": 45,
+      "purchase_order": 32,
+      "goods_receipt": 28
+    },
+    "byAction": {
+      "create": 50,
+      "update": 30,
+      "approve": 20
+    },
+    "byActor": {
+      "buyer-agent": {"count": 45, "role": "buyer"},
+      "requester-agent": {"count": 35, "role": "requester"}
+    }
+  }
+}
+```
+
+### 12. 数据统计分析
+
+```bash
+# 获取概览统计
+GET /api/statistics/overview?period=month
+
+# 返回示例
+{
+  "data": {
+    "period": "month",
+    "startDate": "2026-03-01T00:00:00.000Z",
+    "endDate": "2026-03-25T...",
+    "purchaseRequests": {
+      "total": 45,
+      "byStatus": {"draft": 5, "pending": 10, "approved": 30}
+    },
+    "purchaseOrders": {
+      "total": 32,
+      "totalAmount": 156000.00,
+      "avgAmount": 4875.00
+    },
+    "goodsReceipts": {
+      "total": 28,
+      "received": 1200,
+      "returned": 50,
+      "netReceived": 1150
+    },
+    "suppliers": {"total": 15, "active": 12, "inactive": 3},
+    "materials": {"total": 200, "active": 180, "inactive": 20}
+  }
+}
+
+# 获取趋势数据
+POST /api/statistics/trend
+{
+  "metric": "po_amount",
+  "period": "month",
+  "periods": 6
+}
+
+# 返回示例
+{
+  "data": {
+    "metric": "po_amount",
+    "period": "month",
+    "periods": 6,
+    "trend": [
+      {"date": "2025-10", "value": 120000},
+      {"date": "2025-11", "value": 135000},
+      {"date": "2025-12", "value": 110000},
+      {"date": "2026-01", "value": 145000},
+      {"date": "2026-02", "value": 160000},
+      {"date": "2026-03", "value": 156000}
+    ],
+    "summary": {
+      "avg": 137666.67,
+      "min": 110000,
+      "max": 160000,
+      "latest": 156000,
+      "change": -4000
+    }
+  }
+}
+```
+
+### 13. 事件发布与订阅
+
+```bash
+# 发布事件
+POST /api/events
+{
+  "type": "pr.submitted",
+  "data": {
+    "prId": 1,
+    "prNumber": "PR-20260325-01"
+  },
+  "routing": {
+    "targetRoles": ["manager"]
+  }
+}
+
+# 查询事件列表
+GET /api/events?type=pr.submitted&from=2026-03-01
+
+# 查询单个事件
+GET /api/events/{eventId}
+
+# 获取订阅列表
+GET /api/agent-bindings/{id}/subscriptions
+
+# 更新订阅
+PUT /api/agent-bindings/{id}/subscriptions
+{
+  "subscriptions": ["pr.submitted", "gr.overdelivered", "price.high"],
+  "webhookUrl": "https://your-server.com/webhook"
+}
+
+# 设置默认订阅
+POST /api/agent-bindings/{id}/subscriptions/defaults
+```
+
+### 14. 查询 Agent 绑定
 
 ```bash
 # 查询绑定状态

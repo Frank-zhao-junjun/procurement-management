@@ -31,62 +31,91 @@
 - 健康检查、限流、缓存层已实现
 - 细粒度权限配置：创建统一的权限矩阵，统一管理 REST API 和 MCP 工具权限
 
-## 核心文件修改
-### 新建文件
-- `src/lib/permissions.ts` - 细粒度权限配置文件（角色 × 资源 × 操作矩阵）
-- `src/middleware/api-permission.ts` - REST API 权限控制中间件
-- `src/mcp/tool-policy.ts` - MCP 工具权限控制（已重构，与权限配置对齐）
-- `FEISHU_INTEGRATION.md` - 飞书 Bot 集成分析文档
+## 本次迭代新增功能
 
-### 修改文件
-- `src/app/api/materials/route.ts` - 添加权限检查
-- `src/app/api/purchase-requests/route.ts` - 添加权限检查
-- `src/lib/api-key.ts` - 添加 getApiKeyRole 函数
-- `AGENTS.md` - 更新角色权限说明（细粒度权限矩阵 + MCP 工具权限）
+### 1. Event-Driven Agent 协作架构
 
-## 权限配置设计
+#### 设计文档
+- **`EVENT_DRIVEN_DESIGN.md`** - 详细的架构设计文档
 
-### 核心文件：src/lib/permissions.ts
-```typescript
-// 权限矩阵定义
-export const ROLE_PERMISSIONS = {
-  buyer: {
-    materials: { actions: ['list', 'get'], ... },
-    suppliers: { actions: ['list', 'get', 'create'], ... },
-    // ...
-  },
-  requester: { ... },
-  manager: { ... },
-};
-```
+#### 核心实现
+- **`src/events/types.ts`** - 事件类型定义（30+ 事件类型）
+- **`src/events/publisher.ts`** - 事件发布器
+- **`src/events/subscriber.ts`** - 事件订阅管理器
+- **`src/events/webhook-dispatcher.ts`** - Webhook 投递器
+- **`src/app/api/events/route.ts`** - 事件 API
+- **`src/app/api/agent-bindings/[id]/subscriptions/route.ts`** - 订阅管理 API
+- **`supabase/migrations/002_events_and_subscriptions.sql`** - 数据库迁移
 
-### API 路径映射
-```typescript
-// REST API 路径到资源的映射
-export const API_PATH_TO_RESOURCE = {
-  'GET /api/materials': { resource: 'materials', action: 'list' },
-  'POST /api/suppliers': { resource: 'suppliers', action: 'create' },
-  // ...
-};
-```
+#### 事件类型
+- PR 事件: `pr.created`, `pr.submitted`, `pr.approved`, `pr.rejected`
+- 寻源事件: `sourcing.created`, `sourcing.completed`, `sourcing.failed`
+- 报价事件: `quote.created`, `quote.awarded`, `quote.rejected`
+- PO 事件: `po.created`, `po.sent`, `po.received`, `po.cancelled`
+- 收货事件: `gr.created`, `gr.completed`, `gr.overdelivered`, `gr.return_requested`, `gr.return_approved`
+- 价格预警: `price.high`, `price.abnormal`
 
-## 飞书 Bot 无法主动联系用户的原因分析
+### 2. 退货审批流程
 
-### 问题根源
-1. **缺少飞书 SDK 集成**：系统没有接入飞书开放平台，无法调用发送消息 API
-2. **缺少用户标识映射**：`agentId` 没有映射到飞书 `open_id`
-3. **缺少消息发送机制**：Webhook 只是通知外部服务，不是直接发消息
+- **`src/app/api/goods-receipts/returns/route.ts`** - 退货审批 API
+- Manager 可查看待审批退货列表
+- Manager 可批准或拒绝退货申请
+- 退货批准后自动更新 PO 行数量
 
-### 解决方案
-1. 集成飞书 SDK（@larksuiteoapi/node-sdk）
-2. 创建 `agent_feishu_mapping` 表维护映射
-3. 在事件触发时调用飞书 API 发送消息
+### 3. 物料价格管理
 
-详细方案见 `FEISHU_INTEGRATION.md`
+- **`src/app/api/materials/[id]/price-history/route.ts`** - 历史价格查询 API
+- **`src/app/api/materials/compare-price/route.ts`** - 多供应商比价 API
+- **`src/services/price-warning.ts`** - 价格预警服务
+  - 高于历史均价 10% 触发 `price.high` 事件
+  - 价格波动超过 50% 触发 `price.abnormal` 事件
+
+### 4. 审计日志增强
+
+- **`src/app/api/audit-logs/route.ts`** - 审计日志 API 增强
+- 支持按实体类型、实体 ID、操作类型过滤
+- 支持查看单个实体的完整变更历史
+- 支持审计统计（Manager only）
+
+### 5. 数据统计分析
+
+- **`src/app/api/statistics/route.ts`** - 统计分析 API
+- 概览统计：PR/PO/GR/供应商/物料统计
+- 趋势分析：按天/周/月统计指标变化
+
+## 数据库迁移
+
+执行 `supabase/migrations/002_events_and_subscriptions.sql` 创建：
+- `events` 表 - 事件存储
+- `event_deliveries` 表 - 事件投递记录
+- `agent_subscriptions` 表 - Agent 订阅配置
+- 触发器 - Agent 注册时自动创建默认订阅
+
+## API 清单
+
+| API | 方法 | 说明 |
+|-----|------|------|
+| `/api/events` | GET/POST | 事件查询和发布 |
+| `/api/agent-bindings/{id}/subscriptions` | GET/PUT | 订阅管理 |
+| `/api/goods-receipts/returns/pending` | GET | 待审批退货列表 |
+| `/api/goods-receipts/returns/{id}/approve` | POST | 退货审批 |
+| `/api/materials/{id}/price-history` | GET | 物料价格历史 |
+| `/api/materials/compare-price` | GET | 多供应商比价 |
+| `/api/audit-logs` | GET/POST | 审计日志查询 |
+| `/api/audit-logs/statistics` | PUT | 审计统计 |
+| `/api/statistics/overview` | GET | 概览统计 |
+| `/api/statistics/trend` | POST | 趋势分析 |
 
 ## TODO
 - [x] 创建细粒度权限配置文件 (src/lib/permissions.ts)
 - [x] 实现 MCP 工具权限控制 (src/mcp/tool-policy.ts)
 - [x] 实现 REST API 权限控制 (src/middleware/api-permission.ts)
 - [x] 分析飞书 Bot 无法主动联系用户的原因
+- [x] 实现 Event-Driven Agent 协作架构
+- [x] 实现退货审批流程
+- [x] 实现物料历史价格查询
+- [x] 实现多供应商比价
+- [x] 实现价格预警机制
+- [x] 实现审计日志
+- [x] 实现数据统计分析
 - [ ] 集成飞书 SDK（需要飞书应用 credentials）
