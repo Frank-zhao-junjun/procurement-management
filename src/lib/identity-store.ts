@@ -86,12 +86,12 @@ export function onIdentityChanged(callback: (identity: Identity) => void): () =>
 
 /**
  * 获取身份请求头
+ * 注意：X-Role 由后端 agent_bindings 表管理，前端不可伪造
  */
 export function getIdentityHeaders(): Record<string, string> {
   const identity = getIdentity();
   return {
     'X-Actor': identity.actor,
-    'X-Role': identity.role,
   };
 }
 
