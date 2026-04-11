@@ -84,6 +84,8 @@ Manager 订阅：
 
 ### 1. 注册 Agent
 
+任意 Agent 均可注册新 Agent，注册时自行选择角色（requester / buyer / manager），无需 Manager 审批。
+
 ```bash
 # 注册仅角色的 Agent
 POST /api/agent-bindings
@@ -101,6 +103,8 @@ POST /api/agent-bindings
   "webhookUrl": "https://your-server.com/webhook"
 }
 ```
+
+> **注意**：Agent ID 注册后不可修改，角色由注册时选定。Web 前端默认使用 `web:requester`、`web:buyer`、`web:manager` 三个内置 Agent，系统启动时会自动注册。
 
 ## Webhook 通知
 

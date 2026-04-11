@@ -45,16 +45,12 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/agent-bindings - 创建 Agent 注册
+// 任意已注册 Agent 均可注册新 Agent，注册时自行选择角色
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role: currentRole } = await getUserIdentityWithLookup(request);
+    const { actor, role: currentRole, authError } = await getUserIdentityWithLookup(request);
     const body = await request.json();
-
-    // 权限检查：只有 manager 可以创建 Agent
-    if (currentRole !== 'manager') {
-      return NextResponse.json({ error: '只有 Manager 可以注册 Agent' }, { status: 403 });
-    }
 
     // 验证必填参数
     if (!body.agentId) {
@@ -104,9 +100,9 @@ export async function POST(request: NextRequest) {
       entity_type: 'agent_binding',
       entity_id: agent.id,
       action: 'create',
-      actor,
-      actor_role: currentRole,
-      detail: { agent_id: body.agentId, role: body.role },
+      actor: actor === 'anonymous' ? body.agentId : actor,
+      actor_role: currentRole === 'requester' && actor === 'anonymous' ? body.role : currentRole,
+      detail: { agent_id: body.agentId, role: body.role, registered_by: actor },
     });
 
     return NextResponse.json({ data: agent }, { status: 201 });

@@ -195,7 +195,7 @@ export default function DashboardPage() {
               <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
               <div>
                 <p className="font-semibold text-gray-900">Agent 注册</p>
-                <p className="text-gray-600 mt-1"><code className="bg-gray-100 px-1 rounded">POST /api/agent-bindings</code> 传入 <code className="bg-gray-100 px-1 rounded">agentId</code> 和 <code className="bg-gray-100 px-1 rounded">role</code>。</p>
+                <p className="text-gray-600 mt-1"><code className="bg-gray-100 px-1 rounded">POST /api/agent-bindings</code> 传入 <code className="bg-gray-100 px-1 rounded">agentId</code> 和 <code className="bg-gray-100 px-1 rounded">role</code>（requester / buyer / manager 三选一）。任意 Agent 均可注册新 Agent，注册时自行选择角色，无需 Manager 审批。</p>
               </div>
             </div>
             <div className="flex items-start gap-3 p-3 bg-white rounded-lg shadow-sm">
