@@ -83,6 +83,26 @@ export default function DashboardPage() {
         <p className="text-gray-500 mt-1">Procurement Management System</p>
       </div>
 
+      {/* 新用户提示 */}
+      <Card className="border-amber-200 bg-amber-50">
+        <CardContent className="pt-6">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🤖</span>
+            <div className="flex-1">
+              <p className="font-semibold text-amber-900">首次使用？先注册你的 Agent</p>
+              <p className="text-sm text-amber-700 mt-1">
+                系统基于 Agent 身份运作，每个 Agent 绑定一个角色。前往{' '}
+                <Link href="/agent-management" className="underline font-medium text-amber-900 hover:text-amber-800">
+                  Agent 管理
+                </Link>{' '}
+                页面注册新 Agent，或在 API 调用时传入 <code className="bg-amber-100 px-1 rounded">X-Actor: your-agent-id</code> 自动识别身份。
+                任意 Agent 均可注册新 Agent，注册时自行选择角色（需求人 / 采购员 / 审批经理），无需审批。
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
