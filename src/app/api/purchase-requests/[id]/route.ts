@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, getHeader } from '@/lib/role-filter';
 import { getBeijingISOString } from '@/lib/datetime';
 import { publishPrSubmitted } from '@/events/publisher';
-
-/**
- * 大小写不敏感的 header 读取
- */
-function getHeader(request: NextRequest, name: string): string | null {
-  const value = request.headers.get(name);
-  if (value) return value;
-  const lowerValue = request.headers.get(name.toLowerCase());
-  if (lowerValue) return lowerValue;
-  return request.headers.get(name.toUpperCase());
-}
 
 // GET /api/purchase-requests/[id] - 获取单个采购申请
 export async function GET(

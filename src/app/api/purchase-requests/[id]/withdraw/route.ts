@@ -6,19 +6,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database';
-import { getUserIdentityWithLookup } from '@/lib/role-filter';
+import { getUserIdentityWithLookup, getHeader } from '@/lib/role-filter';
 import { getBeijingISOString } from '@/lib/datetime';
-
-/**
- * 大小写不敏感的 header 读取
- */
-function getHeader(request: NextRequest, name: string): string | null {
-  const value = request.headers.get(name);
-  if (value) return value;
-  const lowerValue = request.headers.get(name.toLowerCase());
-  if (lowerValue) return lowerValue;
-  return request.headers.get(name.toUpperCase());
-}
 
 // POST /api/purchase-requests/{id}/withdraw - 撤回采购申请
 export async function POST(

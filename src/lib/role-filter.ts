@@ -24,7 +24,7 @@ export const ALLOWED_ROLES: UserRole[] = ['requester', 'buyer', 'manager'];
  * 大小写不敏感的 header 读取
  * HTTP Headers 在 Node.js 中是大小写敏感的，但客户端可能发送不同大小写
  */
-function getHeader(request: NextRequest, name: string): string | null {
+export function getHeader(request: NextRequest, name: string): string | null {
   // 尝试原始名称
   const value = request.headers.get(name);
   if (value) return value;
