@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // 查询退货申请列表（gr_type = 'out' 且 status = 'pending_approval'）
+    // 注意：purchase_orders 缺少 supplier_id → suppliers 外键，需手动查询
     let query = client
       .from('goods_receipts')
       .select(`
@@ -36,10 +37,7 @@ export async function GET(request: NextRequest) {
           id,
           po_number,
           supplier_id,
-          suppliers (
-            id,
-            name
-          )
+          supplier_snapshot
         ),
         purchase_order_lines (
           id,
@@ -60,6 +58,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // 批量查询供应商信息
+    const supplierIds = [...new Set(
+      (data || []).map((gr: any) => gr.purchase_orders?.supplier_id).filter(Boolean)
+    )];
+    let supplierMap: Record<number, any> = {};
+    if (supplierIds.length > 0) {
+      const { data: suppliers } = await client
+        .from('suppliers')
+        .select('id, name')
+        .in('id', supplierIds);
+      if (suppliers) {
+        suppliers.forEach((s: any) => { supplierMap[s.id] = s; });
+      }
+    }
+
     // 转换数据格式
     const returns = (data || []).map((gr: any) => ({
       id: gr.id,
@@ -75,7 +88,7 @@ export async function GET(request: NextRequest) {
       poId: gr.purchase_orders?.id,
       poNumber: gr.purchase_orders?.po_number,
       supplierId: gr.purchase_orders?.supplier_id,
-      supplierName: gr.purchase_orders?.suppliers?.name,
+      supplierName: supplierMap[gr.purchase_orders?.supplier_id]?.name || gr.purchase_orders?.supplier_snapshot,
       poLineId: gr.purchase_order_lines?.id,
       materialSnapshot: gr.purchase_order_lines?.material_snapshot,
       orderQty: gr.purchase_order_lines?.quantity,

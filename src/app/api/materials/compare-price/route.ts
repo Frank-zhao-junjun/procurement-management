@@ -95,12 +95,8 @@ export async function GET(request: NextRequest) {
           purchase_orders (
             id,
             po_number,
-            order_date,
             supplier_id,
-            suppliers (
-              id,
-              name
-            )
+            supplier_snapshot
           )
         `)
         .ilike('material_snapshot', `%${materialName}%`)
@@ -109,10 +105,22 @@ export async function GET(request: NextRequest) {
 
       if (fromDate) poQuery.gte('created_at', fromDate);
       if (toDate) poQuery.lte('created_at', toDate);
-      if (supplierId) poQuery.eq('purchase_orders.supplier_id', parseInt(supplierId, 10));
 
       const { data, error } = await poQuery;
       if (!error && data) {
+        // 批量查询供应商信息
+        const poSupplierIds = [...new Set(data.map((line: any) => line.purchase_orders?.supplier_id).filter(Boolean))];
+        let poSupplierMap: Record<number, any> = {};
+        if (poSupplierIds.length > 0) {
+          const { data: poSuppliers } = await client
+            .from('suppliers')
+            .select('id, name')
+            .in('id', poSupplierIds);
+          if (poSuppliers) {
+            poSuppliers.forEach((s: any) => { poSupplierMap[s.id] = s; });
+          }
+        }
+
         poLineHistory = data.map((line: any) => ({
           source: 'po',
           id: line.id,
@@ -122,10 +130,10 @@ export async function GET(request: NextRequest) {
           createdAt: line.created_at,
           poId: line.purchase_orders?.id,
           poNumber: line.purchase_orders?.po_number,
-          orderDate: line.purchase_orders?.order_date,
+          orderDate: line.purchase_orders?.created_at,
           supplierId: line.purchase_orders?.supplier_id,
-          supplierName: line.purchase_orders?.suppliers?.name,
-          awarded: null, // PO 行不记录授标状态
+          supplierName: poSupplierMap[line.purchase_orders?.supplier_id]?.name || line.purchase_orders?.supplier_snapshot,
+          awarded: null,
         }));
       }
     }

@@ -189,17 +189,44 @@ export async function GET(
 
     const { data: task, error } = await client
       .from('sourcing_tasks')
-      .select(`
-        *,
-        purchase_requests!inner(id, pr_number, applicant, reason),
-        materials(id, code, name, unit),
-        suppliers(id, name, code, contact, email)
-      `)
+      .select('*')
       .eq('id', taskId)
       .single();
 
     if (error || !task) {
       return NextResponse.json({ error: '寻源任务不存在' }, { status: 404 });
+    }
+
+    // 手动查询关联数据（sourcing_tasks 表没有外键约束，Supabase 无法自动 join）
+    let prData = null;
+    let materialData = null;
+    let supplierData = null;
+
+    if (task.pr_id) {
+      const { data: pr } = await client
+        .from('purchase_requests')
+        .select('id, pr_number, applicant, reason')
+        .eq('id', task.pr_id)
+        .single();
+      prData = pr;
+    }
+
+    if (task.material_id) {
+      const { data: mat } = await client
+        .from('materials')
+        .select('id, code, name, unit')
+        .eq('id', task.material_id)
+        .single();
+      materialData = mat;
+    }
+
+    if (task.target_supplier_id) {
+      const { data: sup } = await client
+        .from('suppliers')
+        .select('id, name, code, contact, email')
+        .eq('id', task.target_supplier_id)
+        .single();
+      supplierData = sup;
     }
 
     // 格式化返回
@@ -208,14 +235,20 @@ export async function GET(
         id: task.id,
         taskNumber: task.task_number,
         prId: task.pr_id,
-        prNumber: task.purchase_requests?.pr_number,
+        prNumber: prData?.pr_number,
+        prApplicant: prData?.applicant,
+        prReason: prData?.reason,
         prLineId: task.pr_line_id,
         materialId: task.material_id,
-        materialCode: task.materials?.code,
-        materialName: task.materials?.name || task.material_snapshot,
+        materialCode: materialData?.code,
+        materialName: materialData?.name || task.material_snapshot,
+        materialUnit: materialData?.unit,
         requirementText: task.requirement_text,
         targetSupplierId: task.target_supplier_id,
-        targetSupplierName: task.suppliers?.name || task.target_supplier_snapshot,
+        targetSupplierName: supplierData?.name || task.target_supplier_snapshot,
+        targetSupplierCode: supplierData?.code,
+        targetSupplierContact: supplierData?.contact,
+        targetSupplierEmail: supplierData?.email,
         status: task.status,
         dueDate: task.due_date,
         result: task.result,

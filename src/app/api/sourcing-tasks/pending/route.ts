@@ -24,27 +24,51 @@ export async function GET(request: NextRequest) {
 
     // 查询待寻源的 PR 行：状态为 pending_sourcing 且没有关联寻源任务的
     // 或者状态为 fa_match_failed 的
+    // 注意：由于缺少部分外键约束，不使用 Supabase auto join，改用手动查询
     const { data, error, count } = await client
       .from('purchase_request_lines')
-      .select(`
-        *,
-        purchase_requests!inner(
-          id,
-          pr_number,
-          status,
-          applicant,
-          reason
-        ),
-        materials(id, code, name, unit)
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
       .in('progress', ['pending_sourcing', 'fa_match_failed'])
-      .eq('purchase_requests.status', 'approved')
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
     if (error) {
       console.error('Error fetching pending sourcing:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // 过滤出关联 PR 状态为 approved 的行（替代 !inner 过滤）
+    const lineData = data || [];
+    const prIds = [...new Set(lineData.map((line: any) => line.request_id).filter(Boolean))];
+    
+    let prMap: Record<number, any> = {};
+    if (prIds.length > 0) {
+      const { data: prs } = await client
+        .from('purchase_requests')
+        .select('id, pr_number, status, applicant, reason')
+        .in('id', prIds)
+        .eq('status', 'approved');
+      
+      if (prs) {
+        prs.forEach((pr: any) => { prMap[pr.id] = pr; });
+      }
+    }
+
+    // 只保留 PR 状态为 approved 的行
+    const approvedLines = lineData.filter((line: any) => prMap[line.request_id]);
+
+    // 批量查询物料信息
+    const materialIds = [...new Set(approvedLines.map((line: any) => line.material_id).filter(Boolean))];
+    let materialMap: Record<number, any> = {};
+    if (materialIds.length > 0) {
+      const { data: mats } = await client
+        .from('materials')
+        .select('id, code, name, unit')
+        .in('id', materialIds);
+      
+      if (mats) {
+        mats.forEach((mat: any) => { materialMap[mat.id] = mat; });
+      }
     }
 
     // 检查每行是否已有寻源任务
@@ -65,26 +89,30 @@ export async function GET(request: NextRequest) {
     }
 
     // 组装结果，标记每行是否已有寻源任务
-    const result = (data || []).map((line: any) => ({
-      id: line.id,
-      prId: line.request_id,
-      prNumber: line.purchase_requests?.pr_number,
-      prReason: line.purchase_requests?.reason,
-      applicant: line.purchase_requests?.applicant,
-      materialId: line.material_id,
-      materialCode: line.materials?.code,
-      materialName: line.materials?.name || line.material_snapshot,
-      unit: line.materials?.unit,
-      quantity: line.quantity,
-      estUnitPrice: line.est_unit_price,
-      requirementText: line.requirement_text,
-      progress: line.progress,
-      sourcingTaskId: sourcingTaskMap[line.id]?.id || null,
-      sourcingTaskNumber: sourcingTaskMap[line.id]?.task_number || null,
-      sourcingTaskStatus: sourcingTaskMap[line.id]?.status || null,
-      hasSourcingTask: !!sourcingTaskMap[line.id],
-      createdAt: line.created_at,
-    }));
+    const result = approvedLines.map((line: any) => {
+      const pr = prMap[line.request_id];
+      const mat = materialMap[line.material_id];
+      return {
+        id: line.id,
+        prId: line.request_id,
+        prNumber: pr?.pr_number,
+        prReason: pr?.reason,
+        applicant: pr?.applicant,
+        materialId: line.material_id,
+        materialCode: mat?.code,
+        materialName: mat?.name || line.material_snapshot,
+        unit: mat?.unit,
+        quantity: line.quantity,
+        estUnitPrice: line.est_unit_price,
+        requirementText: line.requirement_text,
+        progress: line.progress,
+        sourcingTaskId: sourcingTaskMap[line.id]?.id || null,
+        sourcingTaskNumber: sourcingTaskMap[line.id]?.task_number || null,
+        sourcingTaskStatus: sourcingTaskMap[line.id]?.status || null,
+        hasSourcingTask: !!sourcingTaskMap[line.id],
+        createdAt: line.created_at,
+      };
+    });
 
     return NextResponse.json({
       data: result,

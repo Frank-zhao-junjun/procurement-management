@@ -36,6 +36,7 @@ export async function GET(
     const limit = parseInt(searchParams.get('limit') || '20', 10);
 
     // 从 PO 行获取历史成交价格
+    // 注意：purchase_orders 缺少 supplier_id → suppliers 外键，需手动查询
     let query = client
       .from('purchase_order_lines')
       .select(`
@@ -48,12 +49,8 @@ export async function GET(
         purchase_orders (
           id,
           po_number,
-          order_date,
           supplier_id,
-          suppliers (
-            id,
-            name
-          )
+          supplier_snapshot
         )
       `)
       .not('unit_price', 'is', null)
@@ -81,6 +78,21 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // 批量查询供应商信息
+    const supplierIds = [...new Set(
+      (data || []).map((line: any) => line.purchase_orders?.supplier_id).filter(Boolean)
+    )];
+    let supplierMap: Record<number, any> = {};
+    if (supplierIds.length > 0) {
+      const { data: suppliers } = await client
+        .from('suppliers')
+        .select('id, name')
+        .in('id', supplierIds);
+      if (suppliers) {
+        suppliers.forEach((s: any) => { supplierMap[s.id] = s; });
+      }
+    }
+
     // 过滤和转换数据
     const priceHistory = (data || [])
       .filter((line: any) => {
@@ -98,9 +110,9 @@ export async function GET(
         createdAt: line.created_at,
         poId: line.purchase_orders?.id,
         poNumber: line.purchase_orders?.po_number,
-        orderDate: line.purchase_orders?.order_date,
+        orderDate: line.purchase_orders?.created_at,
         supplierId: line.purchase_orders?.supplier_id,
-        supplierName: line.purchase_orders?.suppliers?.name,
+        supplierName: supplierMap[line.purchase_orders?.supplier_id]?.name || line.purchase_orders?.supplier_snapshot,
       }));
 
     // 计算统计信息
