@@ -66,11 +66,22 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
+    const { actor, role, authError } = await getUserIdentityWithLookup(request);
 
     // 权限检查：只有 requester 可以创建采购申请
     if (role !== 'requester') {
       return NextResponse.json({ error: '只有需求人可以创建采购申请' }, { status: 403 });
+    }
+
+    // 拒绝匿名用户创建 PR
+    if (actor === 'anonymous') {
+      return NextResponse.json(
+        { 
+          error: '请先注册 Agent 身份后再创建采购申请',
+          debug: { authError: authError || '未提供有效的认证信息' },
+        },
+        { status: 401 }
+      );
     }
 
     const body = await request.json();

@@ -33,8 +33,16 @@ import { getUserIdentityWithLookup } from '@/lib/role-filter';
 export async function POST(request: NextRequest) {
   try {
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
+    const { actor, role, authError } = await getUserIdentityWithLookup(request);
     const body = await request.json();
+
+    // 拒绝匿名用户
+    if (actor === 'anonymous') {
+      return NextResponse.json(
+        { error: '请先注册 Agent 身份', debug: { authError } },
+        { status: 401 }
+      );
+    }
     const lines = body.lines || [];
     const cancelledLines = body.cancelledLines || [];
 

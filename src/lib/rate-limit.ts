@@ -12,6 +12,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * 大小写不敏感的 header 读取
+ * 注意：此文件在 Edge Runtime（middleware）中使用，不能导入任何使用 Node.js API 的模块。
+ * 因此这里保留独立的 getHeader 实现，不从 role-filter.ts 导入。
  */
 function getHeader(request: NextRequest, name: string): string | null {
   const value = request.headers.get(name);

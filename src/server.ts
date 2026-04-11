@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
+import { ensureWebAgentsRegistered } from '@/storage/database/agent-binding';
 
 const dev = process.env.COZE_PROJECT_ENV !== 'PROD';
 const hostname = process.env.HOSTNAME || 'localhost';
@@ -10,7 +11,14 @@ const port = parseInt(process.env.PORT || '5000', 10);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
+  // 确保前端默认 Agent 已注册
+  try {
+    await ensureWebAgentsRegistered();
+  } catch (err) {
+    console.warn('[Init] Failed to ensure web agents registered:', err);
+  }
+
   const server = createServer(async (req, res) => {
     try {
       const parsedUrl = parse(req.url!, true);

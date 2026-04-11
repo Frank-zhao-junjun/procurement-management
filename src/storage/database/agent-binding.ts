@@ -153,3 +153,28 @@ export async function resolveRoleByAgentId(agentId: string): Promise<Role | null
   const binding = await getByAgentId(agentId);
   return binding?.role || null;
 }
+
+/**
+ * 确保前端默认 Agent 已注册
+ * 前端使用 web:requester / web:buyer / web:manager 作为默认身份
+ * 如果数据库中没有这些记录，所有前端操作都会变成 anonymous 导致权限失败
+ */
+export async function ensureWebAgentsRegistered(): Promise<void> {
+  const webAgents: Array<{ agentId: string; role: Role }> = [
+    { agentId: 'web:requester', role: 'requester' },
+    { agentId: 'web:buyer', role: 'buyer' },
+    { agentId: 'web:manager', role: 'manager' },
+  ];
+
+  for (const { agentId, role } of webAgents) {
+    const existing = await getByAgentId(agentId);
+    if (!existing) {
+      const result = await registerAgent(agentId, role);
+      if (result.success) {
+        console.log(`[Init] Auto-registered web agent: ${agentId} (${role})`);
+      } else {
+        console.warn(`[Init] Failed to register web agent ${agentId}: ${result.error}`);
+      }
+    }
+  }
+}

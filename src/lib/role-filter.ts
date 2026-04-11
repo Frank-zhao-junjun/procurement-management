@@ -39,7 +39,7 @@ export function getHeader(request: NextRequest, name: string): string | null {
 
 /**
  * 获取用户身份与角色（Agent-first 安全版）
- * 
+ *
  * 认证规则：
  * 1. X-API-Key: API Key 验证（最高优先级）
  *    - 验证通过后，使用 API Key 对应的 agent_id 和 role
@@ -47,16 +47,13 @@ export function getHeader(request: NextRequest, name: string): string | null {
  * 2. X-Actor: 仅限已注册的 Agent
  *    - 必须已在 agent_bindings 中注册
  *    - 使用数据库中注册的角色，不可被请求头覆盖
- * 3. X-Role: 已完全禁用（返回 400 错误）
- * 4. 默认: anonymous（无权限）
- * 
+ * 3. 无认证信息: 返回 anonymous（有限权限）
+ *
  * 重要：角色由系统管理，Agent 无法通过任何请求头更改自己的角色！
  */
-export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole }> {
+export async function getUserIdentity(request: NextRequest): Promise<{ actor: string; role: UserRole; authError?: string }> {
   const apiKey = getHeader(request, 'X-API-Key');
   const xActor = getHeader(request, 'X-Actor');
-  
-  console.log(`[getUserIdentity] apiKey present: ${!!apiKey}, xActor: "${xActor}"`);
 
   // 1. API Key 验证（最安全）
   if (apiKey) {
@@ -64,30 +61,27 @@ export async function getUserIdentity(request: NextRequest): Promise<{ actor: st
     if (verified) {
       // API Key 验证通过，使用对应的身份
       if (xActor && xActor !== verified.agentId) {
-        // 安全警告：X-Actor 与 API Key 不匹配
         console.warn(`[Security] X-Actor mismatch: header=${xActor}, key=${verified.agentId}`);
-        return { actor: 'anonymous', role: 'requester' };
+        return { actor: 'anonymous', role: 'requester', authError: `X-Actor(${xActor}) 与 API Key 对应的 Agent(${verified.agentId}) 不匹配` };
       }
       return { actor: verified.agentId, role: verified.role as UserRole };
     }
-    // API Key 无效，拒绝请求
-    return { actor: 'anonymous', role: 'requester' };
+    // API Key 无效
+    return { actor: 'anonymous', role: 'requester', authError: 'API Key 无效或已过期' };
   }
 
   // 2. X-Actor 验证（仅限已注册 Agent）
   if (xActor) {
-    console.log(`[getUserIdentity] Looking up agent: "${xActor}"`);
     const bindingRole = await resolveRoleByAgentId(xActor);
-    console.log(`[getUserIdentity] Found role: "${bindingRole}"`);
-    
+
     if (bindingRole) {
       // 已注册 Agent：使用数据库中的固定角色
       return { actor: xActor, role: bindingRole };
     }
-    
-    // 未注册 Agent：拒绝请求
+
+    // 未注册 Agent：明确告知原因
     console.warn(`[Security] Unregistered agent attempted access: ${xActor}`);
-    return { actor: 'anonymous', role: 'requester' };
+    return { actor: 'anonymous', role: 'requester', authError: `Agent "${xActor}" 未在 agent_bindings 表中注册，请先通过 POST /api/agent-bindings 注册` };
   }
 
   // 3. 无身份标识

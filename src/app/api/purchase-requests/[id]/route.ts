@@ -48,12 +48,7 @@ export async function PUT(
     const { id } = await params;
     const client = getSupabaseClient();
     const body = await request.json();
-    const { actor, role } = await getUserIdentityWithLookup(request);
-
-    // 调试日志
-    console.log(`[DEBUG PUT PR] id=${id}, actor="${actor}", role="${role}"`);
-    console.log(`[DEBUG PUT PR] headers check: raw X-Actor="${request.headers.get('X-Actor')}", raw x-actor="${request.headers.get('x-actor')}"`);
-    console.log(`[DEBUG PUT PR] getHeader result: "${getHeader(request, 'X-Actor')}"`);
+    const { actor, role, authError } = await getUserIdentityWithLookup(request);
 
     // 查询当前 PR 状态
     const { data: existing, error: findError } = await client
@@ -61,8 +56,6 @@ export async function PUT(
       .select('id, status, applicant')
       .eq('id', parseInt(id, 10))
       .single();
-
-    console.log(`[DEBUG PUT PR] existing.applicant="${existing?.applicant}", actor="${actor}", match=${existing?.applicant === actor}`);
 
     if (findError) {
       return NextResponse.json({ error: findError.message }, { status: 500 });
@@ -74,7 +67,6 @@ export async function PUT(
 
     // 权限检查：只有申请人可以修改自己的 PR
     if (existing.applicant !== actor) {
-      console.error(`[Auth Error] 修改被拒绝: applicant="${existing.applicant}", actor="${actor}"`);
       return NextResponse.json(
         { 
           error: '只有申请人可以修改采购申请',
@@ -83,6 +75,7 @@ export async function PUT(
             actualActor: actor,
             match: existing.applicant === actor,
             headerXActor: getHeader(request, 'X-Actor'),
+            authError: authError || (actor === 'anonymous' ? '未提供有效的认证信息。请使用已注册的 X-Actor 或 X-API-Key' : null),
           }
         },
         { status: 403 }
@@ -222,7 +215,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
+    const { actor, role, authError } = await getUserIdentityWithLookup(request);
 
     // 检查状态
     const { data: existing } = await client
@@ -238,7 +231,13 @@ export async function DELETE(
     // 权限检查：只有申请人可以删除自己的 PR
     if (existing.applicant !== actor) {
       return NextResponse.json(
-        { error: '只有申请人可以删除采购申请' },
+        { 
+          error: '只有申请人可以删除采购申请',
+          debug: actor === 'anonymous' ? {
+            authError: authError || '未提供有效的认证信息',
+            hint: '请使用已注册的 X-Actor 或 X-API-Key',
+          } : undefined,
+        },
         { status: 403 }
       );
     }

@@ -23,7 +23,7 @@ export async function POST(
     }
 
     const client = getSupabaseClient();
-    const { actor, role } = await getUserIdentityWithLookup(request);
+    const { actor, role, authError } = await getUserIdentityWithLookup(request);
 
     // 查询 PR
     const { data: existing, error: findError } = await client
@@ -42,7 +42,6 @@ export async function POST(
 
     // 权限检查：只有申请人可以撤回自己的 PR
     if (existing.applicant !== actor) {
-      console.error(`[Auth Error] 撤回被拒绝: applicant="${existing.applicant}", actor="${actor}"`);
       return NextResponse.json(
         { 
           error: '只有申请人可以撤回采购申请',
@@ -51,6 +50,7 @@ export async function POST(
             actualActor: actor,
             match: existing.applicant === actor,
             headerXActor: getHeader(request, 'X-Actor'),
+            authError: authError || (actor === 'anonymous' ? '未提供有效的认证信息。请使用已注册的 X-Actor 或 X-API-Key' : null),
           }
         },
         { status: 403 }
@@ -135,7 +135,7 @@ export async function GET(
     }
 
     const client = getSupabaseClient();
-    const { actor } = await getUserIdentityWithLookup(request);
+    const { actor, authError } = await getUserIdentityWithLookup(request);
 
     // 查询 PR
     const { data: existing, error: findError } = await client
@@ -155,17 +155,28 @@ export async function GET(
     // 检查是否可以撤回
     const canWithdraw = existing.status === 'pending' && existing.applicant === actor;
 
+    let reason: string | null = null;
+    if (!canWithdraw) {
+      if (existing.status !== 'pending') {
+        reason = `当前状态 "${existing.status}" 不能撤回`;
+      } else if (existing.applicant !== actor) {
+        reason = actor === 'anonymous'
+          ? '未提供有效的认证信息，无法验证身份'
+          : '只有申请人可以撤回';
+      }
+    }
+
     return NextResponse.json({
       data: {
         id: prId,
         prNumber: existing.pr_number,
         status: existing.status,
         canWithdraw,
-        reason: !canWithdraw
-          ? existing.status !== 'pending'
-            ? `当前状态 "${existing.status}" 不能撤回`
-            : '只有申请人可以撤回'
-          : null,
+        reason,
+        debug: actor === 'anonymous' ? {
+          authError: authError || '未提供有效的认证信息',
+          hint: '请使用已注册的 X-Actor 或 X-API-Key',
+        } : undefined,
       },
     });
   } catch (error: any) {

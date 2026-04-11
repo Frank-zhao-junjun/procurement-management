@@ -9,17 +9,7 @@ import type { Role } from '@/storage/database/agent-binding';
 import { checkApiPermission } from '@/lib/permissions';
 import { getByAgentId } from '@/storage/database/agent-binding';
 import { getApiKeyRole } from '@/lib/api-key';
-
-/**
- * 大小写不敏感的 header 读取
- */
-function getHeader(request: NextRequest, name: string): string | null {
-  const value = request.headers.get(name);
-  if (value) return value;
-  const lowerValue = request.headers.get(name.toLowerCase());
-  if (lowerValue) return lowerValue;
-  return request.headers.get(name.toUpperCase());
-}
+import { getHeader } from '@/lib/role-filter';
 
 // ============ 权限检查入口 ============
 
