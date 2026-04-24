@@ -1,8 +1,78 @@
 # Agent 使用指南
 
-本系统面向 Agent 设计，支持通过 HTTP API 进行全流程采购管理。
+本系统面向 Agent 设计，支持通过 **HTTP API** 和 **CLI** 进行全流程采购管理。
 
 > **重要**：开发前请先阅读 [API_CONTRACT.md](./API_CONTRACT.md) 了解详细的契约规范和常见问题。
+
+## CLI 快速入门
+
+系统提供专用 CLI 工具 `procurement`，供 Agent 在终端中快速执行采购管理操作。
+
+### 安装与构建
+
+```bash
+# 构建 CLI
+pnpm cli:build
+
+# 或直接运行（无需构建）
+node cli/bin/procurement.js --help
+```
+
+### 配置
+
+```bash
+# 配置 API 地址和身份
+procurement auth login
+
+# 或指定参数
+procurement -u http://localhost:5000 -a my-agent <command>
+
+# 使用 API Key（推荐生产环境）
+procurement -u https://your-domain.com -k sk_xxx <command>
+```
+
+### 常用命令速查
+
+| 命令 | 说明 |
+|------|------|
+| `procurement auth register -i my-agent -r buyer` | 注册新 Agent |
+| `procurement auth whoami` | 查看当前身份 |
+| `procurement material list` | 物料列表 |
+| `procurement material match "无线鼠标"` | 物料匹配 |
+| `procurement supplier list` | 供应商列表 |
+| `procurement pr create` | 交互式创建采购申请 |
+| `procurement pr list` | 采购申请列表 |
+| `procurement pr submit <id>` | 提交采购申请 |
+| `procurement pr approve <lineId>` | 审批 PR 行 |
+| `procurement sourcing list` | 寻源任务列表 |
+| `procurement sourcing pending` | 待寻源任务 |
+| `procurement sourcing update <id> --complete` | 完成寻源 |
+| `procurement quote create` | 创建报价单 |
+| `procurement quote award <id>` | 授标 |
+| `procurement po list` | 采购订单列表 |
+| `procurement po create` | 创建采购订单 |
+| `procurement po send <id>` | 发送采购订单 |
+| `procurement gr create` | 创建收货单 |
+| `procurement fa list` | 框架协议列表 |
+| `procurement fa match <prLineId>` | 匹配框架协议 |
+| `procurement stats overview` | 统计概览 |
+| `procurement event list` | 事件列表 |
+| `procurement workflow create-pr` | 交互式 PR 创建工作流 |
+| `procurement workflow source-to-po` | 交互式寻源到 PO 工作流 |
+| `procurement workflow approve-prs` | 交互式审批工作流 |
+
+### 工作流示例
+
+```bash
+# Requester 创建并提交 PR
+procurement -a my-requester workflow create-pr
+
+# Manager 批量审批
+procurement -a my-manager workflow approve-prs
+
+# Buyer 完成寻源到 PO 全流程
+procurement -a my-buyer workflow source-to-po
+```
 
 ## Agent-first 模型
 
