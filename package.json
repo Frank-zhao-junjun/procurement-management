@@ -1,7 +1,10 @@
 {
-  "name": "projects",
+  "name": "procurement-system",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "procurement": "./cli/bin/procurement.js"
+  },
   "scripts": {
     "build": "bash ./scripts/build.sh",
     "build:mcp": "npx tsc -p tsconfig.mcp.json",
